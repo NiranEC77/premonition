@@ -25,6 +25,27 @@ Column notes:
                  bar volume is not a cumulative session volume, and
                  conflating them would be exactly the kind of silent
                  aggregation this phase must not do).
+  regular_market_*, premarket_*, postmarket_*
+               — yfinance_quote only. Yahoo's quoteSummary exposes price,
+                 volume, and time separately for each of the three session
+                 states, and — critically — regularMarketPrice/Volume are
+                 not guaranteed to keep updating once the regular session
+                 ends. `price`/`volume`/`source_ts` above remain a
+                 best-effort cascade (prefer pre/post market over regular)
+                 for convenience; these nine columns are the raw, uncascaded
+                 values, captured every tick regardless of market state, so
+                 a frozen field is visible directly rather than inferred.
+  last_completed_bar_volume / forming_bar_volume / cumulative_volume_since_open
+               — yfinance_bars_1m only. The bar yfinance returns for "now"
+                 is still accumulating volume for the current minute and
+                 will read near-zero right after the minute turns over.
+                 last_completed_bar_volume is the most recent CLOSED bar's
+                 volume; forming_bar_volume is recorded for transparency
+                 only and must never be treated as "the" volume;
+                 cumulative_volume_since_open sums Volume across every
+                 completed bar back to the start of the returned window
+                 (empirically 04:00 ET with prepost=True) — the forming bar
+                 is excluded from that sum too.
   spread_proxy* — Probe B only. See probes/friction.py for the formula and
                  its version tag (spread_proxy_formula), so a future change
                  to the formula never gets confused with old rows.
@@ -69,6 +90,30 @@ CREATE TABLE IF NOT EXISTS observations (
     spread_proxy         REAL,               -- (day_high - day_low) / day_volume
     spread_proxy_pct      REAL,               -- (day_high - day_low) / day_close * 100
     spread_proxy_formula TEXT,               -- versioned formula id, e.g. 'range_over_volume_v1'
+
+    -- yfinance_quote: uncascaded, per-market-state fields (freeze detection)
+    regular_market_price    REAL,
+    regular_market_volume   REAL,
+    regular_market_time     TEXT,            -- converted UTC ISO 8601
+    regular_market_time_raw TEXT,            -- as given by the source (epoch)
+    premarket_price          REAL,
+    premarket_volume         REAL,
+    premarket_time           TEXT,
+    premarket_time_raw       TEXT,
+    postmarket_price         REAL,
+    postmarket_volume        REAL,
+    postmarket_time          TEXT,
+    postmarket_time_raw      TEXT,
+
+    -- yfinance_bars_1m: forming-bar-safe volume fields
+    last_completed_bar_volume   REAL,
+    last_completed_bar_ts       TEXT,
+    forming_bar_volume          REAL,        -- transparency only; never "the" volume
+    forming_bar_ts               TEXT,
+    cumulative_volume_since_open REAL,       -- sum over completed bars only
+    cumulative_bar_count         INTEGER,
+    cumulative_window_start_ts   TEXT,
+
     raw_payload          TEXT    NOT NULL,   -- full raw response, JSON-encoded
     created_at           TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -90,11 +135,47 @@ CREATE TABLE IF NOT EXISTS rate_limit_events (
 """
 
 
+# Columns added after the initial release. `CREATE TABLE IF NOT EXISTS` in SCHEMA only
+# creates the table on a brand-new probe.sqlite — a file from before a schema change is
+# otherwise left with the old columns, and every insert then fails outright. Since this
+# runs headlessly via systemd with nobody watching, that failure mode is silent until
+# something checks the logs. This keeps an existing file in sync instead.
+_COLUMN_MIGRATIONS = [
+    ("regular_market_price", "REAL"),
+    ("regular_market_volume", "REAL"),
+    ("regular_market_time", "TEXT"),
+    ("regular_market_time_raw", "TEXT"),
+    ("premarket_price", "REAL"),
+    ("premarket_volume", "REAL"),
+    ("premarket_time", "TEXT"),
+    ("premarket_time_raw", "TEXT"),
+    ("postmarket_price", "REAL"),
+    ("postmarket_volume", "REAL"),
+    ("postmarket_time", "TEXT"),
+    ("postmarket_time_raw", "TEXT"),
+    ("last_completed_bar_volume", "REAL"),
+    ("last_completed_bar_ts", "TEXT"),
+    ("forming_bar_volume", "REAL"),
+    ("forming_bar_ts", "TEXT"),
+    ("cumulative_volume_since_open", "REAL"),
+    ("cumulative_bar_count", "INTEGER"),
+    ("cumulative_window_start_ts", "TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(observations)")}
+    for name, sqltype in _COLUMN_MIGRATIONS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE observations ADD COLUMN {name} {sqltype}")
+
+
 def connect(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
     return conn
 
@@ -104,7 +185,15 @@ OBSERVATION_COLUMNS = [
     "status", "http_status", "error", "market_state", "price", "volume",
     "volume_field", "bid", "ask", "bid_size", "ask_size", "day_high",
     "day_low", "day_close", "day_volume", "day_bar_date", "spread_proxy",
-    "spread_proxy_pct", "spread_proxy_formula", "raw_payload",
+    "spread_proxy_pct", "spread_proxy_formula",
+    "regular_market_price", "regular_market_volume",
+    "regular_market_time", "regular_market_time_raw",
+    "premarket_price", "premarket_volume", "premarket_time", "premarket_time_raw",
+    "postmarket_price", "postmarket_volume", "postmarket_time", "postmarket_time_raw",
+    "last_completed_bar_volume", "last_completed_bar_ts",
+    "forming_bar_volume", "forming_bar_ts",
+    "cumulative_volume_since_open", "cumulative_bar_count", "cumulative_window_start_ts",
+    "raw_payload",
 ]
 
 

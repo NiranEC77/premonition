@@ -107,3 +107,85 @@ select * from rate_limit_events order by fetched_at;
 A `status != 'ok'` row is itself a result — a ticker/source pair that never returns data
 during the window is exactly as informative as one that does, and probes never fill that
 gap with a value from another source or a retry.
+
+### The after-hours freeze test (tonight, 15:55–18:00 ET)
+
+The single most dangerous failure mode for this system: `regularMarketPrice` /
+`regularMarketVolume` keep reading as valid numbers after the 16:00 close, indistinguishable
+from a live feed, and get published at 08:30/09:15 as if they were fresh. The after-hours
+window is the cheapest place to catch that, because we already know the ground truth
+(the regular session closed at 16:00) and can watch what each field actually does across it.
+
+Runs automatically via the systemd timer (`systemd/premonition-probe-afterhours.timer`) —
+see "Installing the after-hours timer" below. No manual start needed. To fire it by hand
+instead:
+
+```bash
+bin/premonition-probe --probe a --start 15:55 --end 18:00
+```
+
+Queries, once it's run:
+
+```bash
+sqlite3 /srv/premonition/db/probe.sqlite
+
+-- Does regular_market_price / regular_market_volume change after 16:00, or freeze?
+-- A frozen field will show the SAME value repeated across every fetched_at past 16:00.
+select fetched_at, regular_market_price, regular_market_volume, regular_market_time,
+       postmarket_price, postmarket_volume, postmarket_time, market_state
+from observations
+where probe = 'freshness' and source = 'yfinance_quote' and status = 'ok'
+order by ticker, fetched_at;
+
+-- Collapse to one row per distinct value, per ticker, to see freeze points at a glance —
+-- if regular_market_price has one row before 16:00 and never changes again while
+-- postmarket_price keeps producing new rows, that confirms the freeze.
+select ticker, regular_market_price, regular_market_volume,
+       min(fetched_at) as first_seen, max(fetched_at) as last_seen, count(*) as ticks
+from observations
+where probe = 'freshness' and source = 'yfinance_quote' and status = 'ok'
+group by ticker, regular_market_price, regular_market_volume
+order by ticker, first_seen;
+
+-- Bar-volume forensics: confirm the forming bar was never used, and see the
+-- cumulative total build up tick over tick.
+select ticker, fetched_at, last_completed_bar_volume, forming_bar_volume,
+       cumulative_volume_since_open, cumulative_bar_count
+from observations
+where probe = 'freshness' and source = 'yfinance_bars_1m' and status = 'ok'
+order by ticker, fetched_at;
+```
+
+### Installing the after-hours timer
+
+The `claude-orch` account has no sudo/wheel membership on this box, so these are **user**
+systemd units (`systemctl --user`), not system units — no root needed, and nothing for
+anyone to run by hand beyond this one-time install:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/premonition-probe-afterhours.service ~/.config/systemd/user/
+cp systemd/premonition-probe-afterhours.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now premonition-probe-afterhours.timer
+
+# Without linger, the user manager (and this timer) only runs while claude-orch
+# has an active session. Enable linger so it fires even if nothing is logged in
+# at 15:55 — this does not require root, only for the user to enable it for itself.
+loginctl enable-linger claude-orch
+
+systemctl --user list-timers premonition-probe-afterhours.timer   # confirm next fire time
+```
+
+The timer fires `OnCalendar=Mon-Fri 15:55 America/New_York` and runs the service, which
+invokes `bin/premonition-probe --probe a --start 15:55 --end 18:00`. Output goes to the
+user journal (`journalctl --user -u premonition-probe-afterhours.service`) as well as the
+usual `/srv/premonition/logs/probe-freshness-YYYY-MM-DD.log`. A run that starts late (e.g.
+the box was asleep at 15:55) still covers today's window correctly as long as it starts
+before 18:00 — `Persistent=true` on the timer catches a missed fire and runs it once the
+system is back, rather than silently skipping the day.
+
+If this box later gains a proper deploy account with root (matching CLAUDE.md's eventual
+`/opt/premonition` runtime), migrate these two files to `/etc/systemd/system/` and drop the
+`--user` flag everywhere above — the unit file contents do not need to change, since `%h`
+still resolves correctly under `User=` on a system unit.

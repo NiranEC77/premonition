@@ -1,0 +1,12 @@
+[Unit]
+Description=premonition Probe A (freshness) — after-hours freeze-detection run, 15:55-18:00 ET
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/code/premonition
+EnvironmentFile=-/etc/premonition/env
+ExecStart=%h/code/premonition/.venv/bin/python3 %h/code/premonition/bin/premonition-probe --probe a --start 15:55 --end 18:00
+# The runner itself waits out any gap between launch and 15:55, and stops at
+# 18:00 regardless of when it started — a late launch (box was asleep at
+# 15:55) still produces a useful partial run rather than nothing.
+TimeoutStartSec=infinity

@@ -1,0 +1,13 @@
+[Unit]
+Description=Fire the premonition after-hours latency probe Mon-Fri at 15:55 ET
+
+[Timer]
+# The trailing timezone makes this correct even if the box's system timezone
+# is ever not America/New_York (it currently is, but ET vs. the system clock
+# should never be an assumption baked in silently). Requires systemd >= 239.
+OnCalendar=Mon-Fri 15:55 America/New_York
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
