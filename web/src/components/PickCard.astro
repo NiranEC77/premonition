@@ -1,0 +1,190 @@
+---
+interface Reason {
+  text: string;
+  source_url: string | null;
+  source_ts: string | null;
+}
+
+interface ScoreBreakdown {
+  gap_surprise: number | null;
+  typical_gap_pct: number | null;
+  rvol: number | null;
+  rvol_insufficient_history: boolean;
+  catalyst_freshness: number;
+  key_level_bonus: number;
+  float_bonus: number;
+  weights_used: Record<string, number>;
+  formula_version: string;
+  note?: string;
+}
+
+interface Pick {
+  ticker: string;
+  company_name: string | null;
+  rank: number;
+  score: number;
+  score_breakdown: ScoreBreakdown | null;
+  expected_move_pct: number | null;
+  premarket_gap_pct: number | null;
+  premarket_rvol: number | null;
+  spread_est: number | null;
+  p_continuation: number | null;
+  cluster: string;
+  halt_prone: boolean;
+  recent_ipo: boolean;
+  levels: { premarket_high: number | null; premarket_low: number | null; prior_close: number | null };
+  reasons: Reason[];
+}
+
+interface Props {
+  pick: Pick;
+}
+
+const { pick } = Astro.props;
+
+const gapSurprise = pick.score_breakdown?.gap_surprise ?? null;
+const gapDirection = (pick.premarket_gap_pct ?? 0) >= 0 ? 'up' : 'down';
+
+function moveSentence(): string {
+  if (gapSurprise === null) {
+    return `Gapping ${gapDirection} ${Math.abs(pick.expected_move_pct ?? 0).toFixed(1)}% pre-market.`;
+  }
+  const size = gapSurprise >= 2.5 ? 'a big move' : gapSurprise >= 1.5 ? 'a bigger move than usual' : 'a move worth watching';
+  return `Expect ${size} — about ${gapSurprise.toFixed(1)}× its usual morning, gapping ${gapDirection}.`;
+}
+
+const isThinLiquidity = pick.premarket_rvol !== null ? false : true; // insufficient history to say either way, shown as its own note
+const isWideSpread = pick.spread_est !== null && pick.spread_est > 0.5;
+
+function fmtMoney(v: number | null): string {
+  return v === null ? '—' : `$${v.toFixed(2)}`;
+}
+function fmtPct(v: number | null): string {
+  return v === null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+}
+function fmtTime(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  } catch {
+    return iso;
+  }
+}
+---
+
+<div class="pick-card">
+  <div class="pick-card-head">
+    <div>
+      <span class="pick-rank">#{pick.rank}</span>
+      <span class="pick-ticker">{pick.ticker}</span>
+      {pick.company_name && <span class="pick-company">{pick.company_name}</span>}
+    </div>
+    <span class={`gap-chip gap-${gapDirection}`}>{fmtPct(pick.premarket_gap_pct)}</span>
+  </div>
+
+  <p class="pick-move">{moveSentence()}</p>
+
+  {pick.reasons?.[0]?.text && <p class="pick-why">{pick.reasons[0].text}</p>}
+
+  <div class="pick-levels">
+    <div><span class="level-label">Pre-market high</span><span class="level-value">{fmtMoney(pick.levels?.premarket_high ?? null)}</span></div>
+    <div><span class="level-label">Pre-market low</span><span class="level-value">{fmtMoney(pick.levels?.premarket_low ?? null)}</span></div>
+    <div><span class="level-label">Yesterday's close</span><span class="level-value">{fmtMoney(pick.levels?.prior_close ?? null)}</span></div>
+  </div>
+
+  {(pick.halt_prone || pick.recent_ipo || isWideSpread || isThinLiquidity) && (
+    <div class="pick-warnings">
+      {pick.halt_prone && <span class="warn-chip">⚠ History of trading halts</span>}
+      {pick.recent_ipo && <span class="warn-chip">⚠ Brand-new stock — limited history</span>}
+      {isWideSpread && <span class="warn-chip">⚠ Wide spread</span>}
+      {isThinLiquidity && <span class="warn-chip warn-chip-mild">No volume history yet — can't confirm this is heavily traded</span>}
+    </div>
+  )}
+
+  <details class="pros-section">
+    <summary>For the pros</summary>
+    <div class="pros-body">
+      <table class="pros-table">
+        <tbody>
+          <tr><td>Pre-market gap</td><td class="num">{fmtPct(pick.premarket_gap_pct)}</td></tr>
+          <tr><td>Typical gap for this name</td><td class="num">{pick.score_breakdown?.typical_gap_pct != null ? `${pick.score_breakdown.typical_gap_pct.toFixed(2)}%` : '—'}</td></tr>
+          <tr><td>Pre-market volume vs. average</td><td class="num">{pick.premarket_rvol != null ? `${pick.premarket_rvol.toFixed(2)}×` : 'insufficient history'}</td></tr>
+          <tr><td>Spread estimate</td><td class="num">{pick.spread_est != null ? `${pick.spread_est.toFixed(2)}%` : '—'}</td></tr>
+          <tr><td>Cluster</td><td class="num">{pick.cluster}</td></tr>
+          <tr><td>Continuation probability</td><td class="num">{pick.p_continuation != null ? `${(pick.p_continuation * 100).toFixed(0)}%` : '—'}</td></tr>
+          <tr><td>Score</td><td class="num">{pick.score.toFixed(3)}</td></tr>
+        </tbody>
+      </table>
+
+      {pick.score_breakdown && (
+        <>
+          <p class="pros-subhead">Score breakdown ({pick.score_breakdown.formula_version})</p>
+          <table class="pros-table">
+            <tbody>
+              <tr><td>Gap surprise × weight</td><td class="num">{gapSurprise != null ? `${gapSurprise.toFixed(2)} × ${pick.score_breakdown.weights_used.gap_surprise}` : '—'}</td></tr>
+              <tr><td>RVOL × weight</td><td class="num">{pick.score_breakdown.rvol != null ? `${pick.score_breakdown.rvol.toFixed(2)} × ${pick.score_breakdown.weights_used.rvol}` : '0 (insufficient history)'}</td></tr>
+              <tr><td>Catalyst freshness × weight</td><td class="num">{pick.score_breakdown.catalyst_freshness.toFixed(2)} × {pick.score_breakdown.weights_used.catalyst_freshness}</td></tr>
+              <tr><td>Key-level proximity × weight</td><td class="num">{pick.score_breakdown.key_level_bonus.toFixed(2)} × {pick.score_breakdown.weights_used.key_level_proximity}</td></tr>
+              <tr><td>Small-float bonus</td><td class="num">{pick.score_breakdown.float_bonus.toFixed(2)}</td></tr>
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {pick.reasons?.[0]?.source_url && (
+        <p class="pros-subhead">Source</p>
+        <p class="note">
+          <a href={pick.reasons[0].source_url} target="_blank" rel="noopener">{pick.reasons[0].text}</a>
+          {' '}— {fmtTime(pick.reasons[0].source_ts)}
+        </p>
+      )}
+    </div>
+  </details>
+</div>
+
+<style>
+  .pick-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .pick-card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .pick-rank { color: var(--muted); font-size: 0.85rem; margin-right: 8px; font-variant-numeric: tabular-nums; }
+  .pick-ticker { font-size: 1.4rem; font-weight: 800; letter-spacing: 0.02em; }
+  .pick-company { color: var(--text-secondary); font-size: 0.9rem; margin-left: 10px; }
+  .gap-chip { font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; padding: 4px 10px; border-radius: 8px; }
+  .gap-up { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
+  .gap-down { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 14%, transparent); }
+  .pick-move { font-size: 1.05rem; font-weight: 600; margin: 0; }
+  .pick-why { color: var(--text-secondary); margin: 0; font-size: 0.94rem; }
+  .pick-levels {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    border-top: 1px solid var(--gridline); border-bottom: 1px solid var(--gridline);
+    padding: 12px 0;
+  }
+  .level-label { display: block; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .level-value { display: block; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 1.05rem; margin-top: 2px; }
+  .pick-warnings { display: flex; gap: 8px; flex-wrap: wrap; }
+  .warn-chip {
+    font-size: 0.8rem; font-weight: 700; padding: 5px 10px; border-radius: 999px;
+    background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+    color: var(--status-warning); border: 1px solid color-mix(in srgb, var(--status-warning) 45%, transparent);
+  }
+  .warn-chip-mild { background: transparent; color: var(--text-secondary); border-color: var(--border); font-weight: 600; }
+  .pros-section summary {
+    cursor: pointer; font-size: 0.86rem; font-weight: 600; color: var(--tone-live);
+    list-style: none;
+  }
+  .pros-section summary::-webkit-details-marker { display: none; }
+  .pros-section summary::before { content: '▸ '; }
+  .pros-section[open] summary::before { content: '▾ '; }
+  .pros-body { margin-top: 10px; }
+  .pros-subhead { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin: 14px 0 4px; }
+  .pros-table { width: 100%; font-size: 0.86rem; border-collapse: collapse; }
+  .pros-table td { padding: 4px 0; border-bottom: 1px solid var(--gridline); }
+  .pros-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+</style>

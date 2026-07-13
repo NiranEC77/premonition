@@ -2,7 +2,7 @@
 
 **A pre-market scanner for the opening bell.**
 
-Every trading morning, `premonition` narrows a ~91-name watchlist down to the five names
+Every trading morning, `premonition` narrows a ~91-name watchlist down to the six names
 most likely to make a large, tradable move in the first thirty minutes after the open —
 with the catalyst, the key levels, and an honest record of how often it has been right.
 
@@ -64,7 +64,7 @@ regime, and the brief says which regime it is in.
 ### 3a. The Premonition score — expected opening move, normalized
 
 The watchlist is a high-beta barbell. QUBT, RGTI, and MARA routinely gap 8% on nothing;
-NVDA gapping 4% is a genuine event. Ranking by raw expected move would return the same five
+NVDA gapping 4% is a genuine event. Ranking by raw expected move would return the same six
 volatile names every single day, and the dashboard would be dead within a week.
 
 So the score is **surprise**, not magnitude:

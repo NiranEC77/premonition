@@ -1,0 +1,10 @@
+[Unit]
+Description=Fire the premonition draft run Mon-Fri at 08:30 ET
+
+[Timer]
+OnCalendar=Mon-Fri 08:30 America/New_York
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

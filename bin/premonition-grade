@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# bin/premonition-grade — 16:15 ET run. Grades today's picks and both
+# baselines against what the open actually did.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+source .venv/bin/activate
+set -a; source /etc/premonition/env; set +a
+
+echo "=== $(date) grade run starting ==="
+python3 -m epicenter.grade
+echo "=== $(date) grade run complete ==="

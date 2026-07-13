@@ -1,0 +1,43 @@
+# weights.yaml — scorer feature weights. Deterministic, versioned.
+#
+# CLAUDE.md: "Do not tune weights until the backtest flatters you." These are
+# starting values, not fitted to anything — the backtest gate (DESIGN.md
+# phase 3) hasn't run yet, hence shadow mode. They move only when the
+# scoreboard says they should, never to make one morning's picks look better.
+
+formula_version: shadow_v1
+
+weights:
+  gap_surprise: 0.5          # |premarket_gap_pct| / this ticker's own typical_gap_pct
+  rvol: 0.3                  # premarket_volume / this ticker's own trailing baseline — 0 if insufficient_history
+  catalyst_freshness: 0.15   # decays with catalyst_freshness_half_life_hours
+  key_level_proximity: 0.05  # binary: premarket_price above its trailing 20-day high
+
+min_rvol_history_days: 5     # fewer real premarket_volume_history rows than this -> RVOL is insufficient_history, not guessed
+catalyst_freshness_half_life_hours: 12
+
+float_bonus:
+  small_float_threshold: 20000000   # shares
+  small_float_bonus: 0.1            # additive; small float + gap + volume is where violent moves live (DESIGN.md 3b.3)
+
+continuation_probability:
+  # p_continuation_heuristic_v1 — a documented heuristic, not a trained model.
+  # DESIGN.md: "Heavy pre-market relative volume tends to continue; thin gaps
+  # tend to fill." This is that heuristic, made numeric and versioned so it
+  # can be replaced without confusing past picks' recorded probabilities.
+  baseline: 0.5
+  rvol_sensitivity: 0.08       # per unit of (rvol - 1), clipped before applying
+  gap_surprise_sensitivity: 0.03
+  min: 0.1
+  max: 0.9
+
+max_picks: 6
+max_per_cluster: 2
+
+# recent_ipo tickers (SPCX, SNDK as of this writing) are excluded from
+# ranking entirely for now — there is no principled way yet to compare a raw,
+# unnormalized gap % against every other ticker's surprise-ratio score
+# without fabricating a conversion. CLAUDE.md: "do not let a short window
+# silently produce a confident-looking normalized score." They appear on
+# /health with their insufficient_history status; they do not compete for a
+# pick slot until this gets a real, considered design.

@@ -1,0 +1,20 @@
+{/* Un-dismissible by design — no close button, no localStorage-remembered
+    dismissal. This stays until the backtest gate actually passes (CLAUDE.md's
+    phase gate), at which point shadow_mode flips in the database, not here. */}
+<div class="shadow-banner">
+  <strong>Shadow mode — we're testing.</strong>
+  These are not recommendations. We're tracking how right they are before showing them for real.
+</div>
+
+<style>
+  .shadow-banner {
+    background: color-mix(in srgb, var(--status-warning) 16%, transparent);
+    border: 1px solid var(--status-warning);
+    color: var(--text-primary);
+    border-radius: 10px;
+    padding: 12px 18px;
+    font-size: 0.92rem;
+    margin-bottom: 24px;
+  }
+  .shadow-banner strong { color: var(--status-warning); }
+</style>

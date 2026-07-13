@@ -1,7 +1,10 @@
 ---
+export const prerender = false;
+
 import Base from '../layouts/Base.astro';
 import StatusBadge from '../components/StatusBadge.astro';
 import { supabase, supabaseConfigured, supabaseConfigError } from '../lib/supabase';
+import { isSessionValid, SESSION_COOKIE_NAME } from '../lib/session';
 
 interface TickerHealthRow {
   ticker: string;
@@ -11,6 +14,8 @@ interface TickerHealthRow {
   missing: string[] | null;
   checked_at: string;
 }
+
+const isEditor = isSessionValid(Astro.cookies.get(SESSION_COOKIE_NAME)?.value);
 
 let rows: TickerHealthRow[] = [];
 let queryError: string | null = null;
@@ -32,6 +37,11 @@ const attention = rows
 
 function fmtTime(iso: string): string {
   return new Date(iso).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+
+function parseSuggestion(reason: string | null): string | null {
+  const m = reason?.match(/did you mean ([A-Z]+)\?/i);
+  return m ? m[1].toUpperCase() : null;
 }
 ---
 
@@ -59,6 +69,35 @@ function fmtTime(iso: string): string {
     </div>
   )}
 
+  <div class="card" id="editor-panel">
+    {!isEditor ? (
+      <>
+        <button id="show-login-btn" class="btn-secondary" type="button">Edit watchlist</button>
+        <form id="login-form" class="inline-form" hidden>
+          <input type="password" id="passphrase" placeholder="Passphrase" autocomplete="off" />
+          <button type="submit" class="btn-primary">Unlock editing</button>
+          <span id="login-error" class="error-text"></span>
+        </form>
+      </>
+    ) : (
+      <div class="editor-active">
+        <strong>Editing unlocked.</strong> Changes write an append-only entry to the watchlist log — nothing is ever silently overwritten.
+        <button id="logout-btn" class="btn-secondary" type="button">Lock editing</button>
+      </div>
+    )}
+  </div>
+
+  {isEditor && (
+    <div class="card" id="add-ticker-card">
+      <h2 style="margin-top:0;">Add a ticker</h2>
+      <div class="inline-form">
+        <input id="add-ticker-input" placeholder="e.g. AMD" autocomplete="off" style="text-transform:uppercase;" />
+        <button id="add-ticker-btn" class="btn-primary" type="button">Add</button>
+      </div>
+      <p class="note" id="add-ticker-result"></p>
+    </div>
+  )}
+
   {supabaseConfigured && !queryError && total === 0 && (
     <div class="empty-block">
       <strong>No health data published yet.</strong>
@@ -77,13 +116,30 @@ function fmtTime(iso: string): string {
       {attention.length > 0 && (
         <div class="attention-panel">
           <h2>Needs attention ({attention.length})</h2>
-          <ul>
-            {attention.map((r) => (
-              <li>
-                <StatusBadge status={r.status} kind="health" /> <strong>{r.ticker}</strong>
-                {r.reason ? ` — ${r.reason}` : ''}
-              </li>
-            ))}
+          <ul class="attention-list">
+            {attention.map((r) => {
+              const suggestion = parseSuggestion(r.reason);
+              return (
+                <li data-ticker={r.ticker}>
+                  <div>
+                    <StatusBadge status={r.status} kind="health" /> <strong>{r.ticker}</strong>
+                    {r.reason ? ` — ${r.reason}` : ''}
+                  </div>
+                  {isEditor && (
+                    <div class="ticker-actions">
+                      {suggestion && (
+                        <button class="btn-fix" data-action="fix" data-ticker={r.ticker} data-new-ticker={suggestion}>
+                          Fix: {r.ticker} → {suggestion}
+                        </button>
+                      )}
+                      <button class="btn-remove" data-action="remove" data-ticker={r.ticker}>Remove</button>
+                      <button class="btn-keep" data-action="keep" data-ticker={r.ticker}>Keep anyway</button>
+                      <span class="action-result" data-result-for={r.ticker}></span>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -116,3 +172,109 @@ function fmtTime(iso: string): string {
     </>
   )}
 </Base>
+
+<style>
+  .inline-form { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+  .inline-form input {
+    padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--page-plane); color: var(--text-primary); font-size: 0.9rem;
+  }
+  .btn-primary, .btn-secondary, .btn-fix, .btn-remove, .btn-keep {
+    border-radius: 6px; padding: 7px 12px; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--tone-live); color: white; }
+  .btn-secondary { background: transparent; border-color: var(--border); color: var(--text-primary); }
+  .btn-fix { background: color-mix(in srgb, var(--status-good) 16%, transparent); border-color: var(--status-good); color: var(--status-good); }
+  .btn-remove { background: color-mix(in srgb, var(--status-critical) 12%, transparent); border-color: var(--status-critical); color: var(--status-critical); }
+  .btn-keep { background: transparent; border-color: var(--border); color: var(--text-secondary); }
+  .error-text { color: var(--status-critical); font-size: 0.85rem; }
+  .editor-active { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .attention-list { list-style: none; padding: 0; margin: 0; }
+  .attention-list li { padding: 10px 0; border-bottom: 1px solid var(--gridline); }
+  .attention-list li:last-child { border-bottom: none; }
+  .ticker-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .action-result { font-size: 0.82rem; color: var(--text-secondary); }
+</style>
+
+<script>
+  async function postJson(url: string, body: unknown) {
+    const resp = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, status: resp.status, data };
+  }
+
+  document.getElementById('show-login-btn')?.addEventListener('click', () => {
+    document.getElementById('login-form')?.removeAttribute('hidden');
+  });
+
+  document.getElementById('login-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = document.getElementById('passphrase') as HTMLInputElement;
+    const errEl = document.getElementById('login-error')!;
+    const { ok, data } = await postJson('/api/auth', { passphrase: input.value });
+    if (ok) {
+      window.location.reload();
+    } else {
+      errEl.textContent = data.error || 'incorrect passphrase';
+    }
+  });
+
+  document.getElementById('logout-btn')?.addEventListener('click', async () => {
+    await fetch('/api/auth', { method: 'DELETE' });
+    window.location.reload();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('.ticker-actions button[data-action]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.action!;
+      const ticker = btn.dataset.ticker!;
+      const resultEl = document.querySelector(`[data-result-for="${ticker}"]`)!;
+
+      if (action === 'keep') {
+        // No watchlist_events row — nothing about the watchlist actually
+        // changed, so there is nothing to log. Just dismisses the prompt
+        // for this session.
+        btn.closest('li')?.querySelectorAll('.ticker-actions button').forEach((b) => (b as HTMLButtonElement).disabled = true);
+        resultEl.textContent = 'Kept — no change made.';
+        return;
+      }
+
+      let body: Record<string, unknown>;
+      if (action === 'remove') {
+        body = { action: 'remove', ticker };
+      } else if (action === 'fix') {
+        body = { action: 'fix', ticker, newTicker: btn.dataset.newTicker };
+      } else {
+        return;
+      }
+
+      btn.disabled = true;
+      resultEl.textContent = 'Working…';
+      const { ok, data } = await postJson('/api/tickers', body);
+      if (ok) {
+        resultEl.textContent = 'Done — logged to watchlist_events. Refresh to see the updated list.';
+      } else {
+        resultEl.textContent = data.error || 'Something went wrong.';
+        btn.disabled = false;
+      }
+    });
+  });
+
+  document.getElementById('add-ticker-btn')?.addEventListener('click', async () => {
+    const input = document.getElementById('add-ticker-input') as HTMLInputElement;
+    const resultEl = document.getElementById('add-ticker-result')!;
+    const ticker = input.value.trim().toUpperCase();
+    if (!ticker) return;
+    resultEl.textContent = 'Checking…';
+    const { ok, data } = await postJson('/api/tickers', { action: 'add', newTicker: ticker });
+    if (ok) {
+      resultEl.textContent = `Added ${ticker} — logged to watchlist_events. Refresh to see it.`;
+      input.value = '';
+    } else {
+      resultEl.textContent = data.error || 'Could not add that ticker.';
+    }
+  });
+</script>

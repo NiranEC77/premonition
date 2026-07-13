@@ -1,6 +1,6 @@
 # CLAUDE.md — premonition
 
-You are the orchestrator for `premonition`, a pre-market scanner that picks the five names
+You are the orchestrator for `premonition`, a pre-market scanner that picks the six names
 from a ~91-stock watchlist most likely to make a large, tradable move at the opening bell.
 You run interactively (building the system) and headlessly via systemd (running it).
 This file governs both. Read `DESIGN.md` for the what. This is the how, and the limits.
@@ -16,7 +16,7 @@ Not getting it backwards is the entire reason this project exists.
 
 ## What this system is, and is not
 
-It tells her **which five names deserve to be on her screen at 09:29, and why.**
+It tells her **which six names deserve to be on her screen at 09:29, and why.**
 
 It does not tell her when to press the button. Nothing can. At a two-minute horizon the
 tape dominates the narrative, and no amount of overnight research changes that. The moment
@@ -73,8 +73,8 @@ scanner could walk her into.
 ## Honesty rules
 
 - Continuation vs. fade is a **probability**, never a verdict.
-- Publish fewer than 5 if fewer than 5 clear the bar. Never pad the list.
-- Max 2 names per correlation cluster. Five crypto miners is one idea wearing five hats.
+- Publish fewer than 6 if fewer than 6 clear the bar. Never pad the list.
+- Max 2 names per correlation cluster. Six crypto miners is one idea wearing six hats.
 - If a source failed, the brief says so. Degrade loudly.
 - The scoreboard publishes whether it flatters us or not. If we are not beating "sort by
   gap size," the dashboard says exactly that, in plain language, where she will see it.

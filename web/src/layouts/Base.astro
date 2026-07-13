@@ -3,7 +3,7 @@ import '../styles/global.css';
 
 interface Props {
   title: string;
-  active?: 'health' | 'freshness' | 'scoreboard' | '';
+  active?: 'health' | 'freshness' | 'how' | '';
 }
 
 const { title, active = '' } = Astro.props;
@@ -26,7 +26,7 @@ const { title, active = '' } = Astro.props;
         <a class="brand" href="/">premonition</a>
         <a class="navlink" href="/health" aria-current={active === 'health' ? 'page' : undefined}>Watchlist Health</a>
         <a class="navlink" href="/freshness" aria-current={active === 'freshness' ? 'page' : undefined}>Data Freshness</a>
-        <a class="navlink" href="/scoreboard" aria-current={active === 'scoreboard' ? 'page' : undefined}>Scoreboard</a>
+        <a class="navlink" href="/how-this-works" aria-current={active === 'how' ? 'page' : undefined}>How this works</a>
       </div>
     </nav>
     <main class="wrap">

@@ -1,0 +1,10 @@
+[Unit]
+Description=Fire the premonition lock run Mon-Fri at 09:15 ET
+
+[Timer]
+OnCalendar=Mon-Fri 09:15 America/New_York
+Persistent=true
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

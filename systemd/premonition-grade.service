@@ -1,0 +1,8 @@
+[Unit]
+Description=premonition 16:15 grade — actual outcomes vs. picks vs. both baselines
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/code/premonition
+ExecStart=%h/code/premonition/bin/premonition-grade
+TimeoutStartSec=600

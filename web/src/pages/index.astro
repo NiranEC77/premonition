@@ -1,27 +1,177 @@
 ---
 import Base from '../layouts/Base.astro';
+import PickCard from '../components/PickCard.astro';
+import ShadowModeBanner from '../components/ShadowModeBanner.astro';
+import { supabase, supabaseConfigured, supabaseConfigError } from '../lib/supabase';
+
+const MIN_SESSIONS_FOR_VERDICT = 20;
+
+interface BaselineRow {
+  session_date: string;
+  naive_mean_range: number | null;
+  rvol_mean_range: number | null;
+  universe_mean_range: number | null;
+  our_mean_range: number | null;
+}
+
+let baselineRows: BaselineRow[] = [];
+let latestBrief: { id: number; session_date: string; shadow_mode: boolean; cluster_story: string | null } | null = null;
+let picks: any[] = [];
+let queryError: string | null = null;
+
+if (supabaseConfigured && supabase) {
+  const [baselineRes, briefRes] = await Promise.all([
+    supabase.from('baselines').select('session_date, naive_mean_range, rvol_mean_range, universe_mean_range, our_mean_range')
+      .order('session_date', { ascending: false }),
+    supabase.from('briefs').select('id, session_date, shadow_mode, cluster_story')
+      .eq('stage', 'lock').eq('status', 'published')
+      .order('session_date', { ascending: false }).limit(1),
+  ]);
+  if (baselineRes.error) queryError = baselineRes.error.message;
+  else baselineRows = baselineRes.data ?? [];
+
+  if (!queryError && briefRes.error) queryError = briefRes.error.message;
+  else if (briefRes.data && briefRes.data.length > 0) {
+    latestBrief = briefRes.data[0];
+    const picksRes = await supabase.from('picks').select('*').eq('brief_id', latestBrief!.id).order('rank');
+    if (picksRes.error) queryError = picksRes.error.message;
+    else picks = picksRes.data ?? [];
+  }
+}
+
+const gradedSessions = baselineRows.filter((b) => b.our_mean_range !== null);
+const hasEnoughHistory = gradedSessions.length >= MIN_SESSIONS_FOR_VERDICT;
+
+let beatBothCount = 0;
+for (const b of gradedSessions) {
+  if (b.our_mean_range! > (b.naive_mean_range ?? -Infinity) && b.our_mean_range! > (b.rvol_mean_range ?? -Infinity)) {
+    beatBothCount++;
+  }
+}
 ---
 
-<Base title="Dashboard" active="">
-  <h1>premonition</h1>
-  <p class="lede">
-    A pre-market scanner for the opening bell. This dashboard is the operational view of
-    what the system can currently see — it does not publish picks, scores, or trade
-    recommendations. The backtest gate that would allow that has not been passed yet.
-  </p>
+<Base title="Scoreboard" active="">
+  <h1 class="verdict-question">How often has this been right?</h1>
 
-  <div class="card-grid">
-    <a class="card" href="/health">
-      <h3>Watchlist Health</h3>
-      <p>All 91 tickers and what state each one is in — resolved, flagged, or unresolved.</p>
-    </a>
-    <a class="card" href="/freshness">
-      <h3>Data Freshness</h3>
-      <p>How stale is each free data source, and which Yahoo fields actually stay live after the close.</p>
-    </a>
-    <a class="card" href="/scoreboard">
-      <h3>Scoreboard</h3>
-      <p>Where the model's track record against the naive baseline will be published — once there is one.</p>
-    </a>
+  {!supabaseConfigured && (
+    <div class="error-block">
+      <strong>Not connected.</strong>
+      {supabaseConfigError}
+    </div>
+  )}
+
+  {supabaseConfigured && queryError && (
+    <div class="error-block">
+      <strong>Query failed.</strong>
+      {queryError}
+    </div>
+  )}
+
+  {supabaseConfigured && !queryError && !hasEnoughHistory && (
+    <p class="verdict-answer verdict-waiting">
+      Nothing yet — we're still keeping score. Come back after {MIN_SESSIONS_FOR_VERDICT} mornings
+      ({gradedSessions.length} graded so far).
+    </p>
+  )}
+
+  {hasEnoughHistory && (
+    <p class="verdict-answer">
+      In {beatBothCount} of the last {gradedSessions.length} mornings, our picks moved bigger at the
+      open than both of the dumb strategies below. {beatBothCount < gradedSessions.length / 2 &&
+        " That's not good enough yet — see the honest comparison below."}
+    </p>
+  )}
+
+  <div class="baseline-explainer">
+    <p>
+      We compare ourselves against two strategies anyone could run without any of this:
+      <strong>just picking the six stocks that moved the most overnight</strong>, and
+      <strong>just picking the six with the most overnight trading</strong>. If we can't beat
+      both of those, this dashboard says so, plainly, right here — that's the whole point of
+      keeping score in public.
+    </p>
   </div>
+
+  {gradedSessions.length > 0 && (
+    <div class="table-scroll" style="margin-bottom:32px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Morning</th>
+            <th class="num">Us</th>
+            <th class="num">Biggest overnight movers</th>
+            <th class="num">Most overnight trading</th>
+            <th class="num">Everyone (average)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {gradedSessions.slice(0, 30).map((b) => (
+            <tr>
+              <td>{b.session_date}</td>
+              <td class="num">{b.our_mean_range?.toFixed(2)}%</td>
+              <td class="num">{b.naive_mean_range?.toFixed(2) ?? '—'}%</td>
+              <td class="num">{b.rvol_mean_range?.toFixed(2) ?? '—'}%</td>
+              <td class="num">{b.universe_mean_range?.toFixed(2) ?? '—'}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+
+  <h2 style="margin-top:48px;">This morning</h2>
+
+  <ShadowModeBanner />
+
+  {latestBrief?.cluster_story && (
+    <p class="lede">{latestBrief.cluster_story}</p>
+  )}
+
+  {supabaseConfigured && !queryError && !latestBrief && (
+    <div class="empty-block">
+      <strong>No lock has published yet.</strong>
+      The 09:15 ET lock publishes automatically on weekdays. Nothing has run yet.
+    </div>
+  )}
+
+  {latestBrief && picks.length === 0 && (
+    <div class="empty-block">
+      <strong>Zero picks cleared the bar on {latestBrief.session_date}.</strong>
+      That's a real, honest outcome, not a bug — the tradability gate rejected everything that
+      morning, or nothing had a big enough pre-market surprise to be worth watching. Nothing is
+      padded onto the list to make six.
+    </div>
+  )}
+
+  {picks.length > 0 && (
+    <div class="pick-grid">
+      {picks.map((p) => <PickCard pick={p} />)}
+    </div>
+  )}
 </Base>
+
+<style>
+  .verdict-question {
+    font-size: 2rem;
+    margin-bottom: 12px;
+  }
+  .verdict-answer {
+    font-size: 1.15rem;
+    max-width: 68ch;
+    margin: 0 0 24px;
+  }
+  .verdict-waiting { color: var(--text-secondary); }
+  .baseline-explainer {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 28px;
+  }
+  .baseline-explainer p { margin: 0; color: var(--text-secondary); font-size: 0.95rem; max-width: 72ch; }
+  .pick-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 18px;
+  }
+</style>

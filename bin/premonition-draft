@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# bin/premonition-draft — 08:30 ET run. Refreshes all collectors ahead of the
+# 09:15 lock. Does not publish anything — see DESIGN.md's schedule table.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+source .venv/bin/activate
+set -a; source /etc/premonition/env; set +a
+
+echo "=== $(date) draft run starting ==="
+python3 -m seismo.collect_daily --days 90
+python3 -m seismo.collect_quotes
+python3 -m seismo.collect_fundamentals
+python3 -m seismo.collect_earnings
+python3 -m seismo.collect_catalysts
+python3 -m seismo.collect_macro
+echo "=== $(date) draft run complete ==="

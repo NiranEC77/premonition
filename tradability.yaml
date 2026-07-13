@@ -1,0 +1,21 @@
+# tradability.yaml — the floor. Enforced BEFORE ranking, never after.
+#
+# CLAUDE.md: "A 14% gapper with 30k pre-market shares, a wide spread, and a
+# 4M float is not an opportunity — it is a trap, and surfacing it does real
+# harm. Below the floor means invisible, no matter how big the gap."
+#
+# These are starting thresholds, not tuned against a backtest (the backtest
+# gate hasn't been run yet — see DESIGN.md phase 3). They exist so the gate
+# can be ENFORCED from day one rather than bolted on later; the numbers
+# themselves should move only when the scoreboard says so, same rule as
+# scorer weights.
+
+min_premarket_dollar_volume: 500000    # $500k pre-market dollar volume
+max_spread_pct: 1.5                    # spread as % of price; proxy when real spread unavailable
+min_price: 2.00                        # sub-$2 names carry structurally wide spreads
+min_float_shares: 5000000              # 5M share float floor
+
+# Names with no usable premarket_volume figure at all (see facts_db.py's
+# module docstring on the extended-hours volume gap) cannot be evaluated
+# against min_premarket_dollar_volume and are gated out as INSUFFICIENT_DATA,
+# not silently passed through on a missing-means-zero assumption.

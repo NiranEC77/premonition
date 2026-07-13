@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# bin/premonition-lock — 09:15 ET run. THE LOCK. Refreshes the live quote
+# snapshot (freshest possible pre-market gap + volume) and publishes.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+source .venv/bin/activate
+set -a; source /etc/premonition/env; set +a
+
+echo "=== $(date) lock run starting ==="
+python3 -m seismo.collect_quotes
+python3 -m epicenter.publish_lock
+echo "=== $(date) lock run complete ==="

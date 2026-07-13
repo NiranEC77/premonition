@@ -1,0 +1,10 @@
+[Unit]
+Description=Fire the premonition grade run Mon-Fri at 16:15 ET
+
+[Timer]
+OnCalendar=Mon-Fri 16:15 America/New_York
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+[Unit]
+Description=premonition 08:30 draft run — refresh all collectors ahead of the lock
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/code/premonition
+ExecStart=%h/code/premonition/bin/premonition-draft
+TimeoutStartSec=600
