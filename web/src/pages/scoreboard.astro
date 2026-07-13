@@ -1,0 +1,100 @@
+---
+import Base from '../layouts/Base.astro';
+import { supabase, supabaseConfigured, supabaseConfigError } from '../lib/supabase';
+
+interface BaselineRow {
+  session_date: string;
+  naive_mean_range: number | null;
+  rvol_mean_range: number | null;
+  universe_mean_range: number | null;
+  our_mean_range: number | null;
+  computed_at: string;
+}
+
+let rows: BaselineRow[] = [];
+let queryError: string | null = null;
+
+if (supabaseConfigured && supabase) {
+  const { data, error } = await supabase
+    .from('baselines')
+    .select('session_date, naive_mean_range, rvol_mean_range, universe_mean_range, our_mean_range, computed_at')
+    .order('session_date', { ascending: false })
+    .limit(30);
+  if (error) queryError = error.message;
+  else rows = data ?? [];
+}
+
+const hasAnyRealComparison = rows.some((r) => r.our_mean_range !== null);
+---
+
+<Base title="Scoreboard" active="scoreboard">
+  <h1>Scoreboard</h1>
+
+  {!supabaseConfigured && (
+    <div class="error-block">
+      <strong>Not connected.</strong>
+      {supabaseConfigError}
+    </div>
+  )}
+
+  {supabaseConfigured && queryError && (
+    <div class="error-block">
+      <strong>Query failed.</strong>
+      {queryError}
+    </div>
+  )}
+
+  {supabaseConfigured && !queryError && !hasAnyRealComparison && (
+    <div class="empty-block">
+      <strong>No picks published.</strong>
+      The model has not yet beaten the naive baseline, so nothing is being recommended.
+      <p class="note" style="margin-top:12px;">
+        Before any picks page exists, the backtest must show the scorer beating
+        <em>"just pick the 5 biggest pre-market gaps"</em> — replayed across roughly 120
+        opens. That gate has not been passed. Building this page out further, before it
+        has, would be the one failure mode this project is explicitly built to avoid:
+        a confident-looking dashboard on top of no edge.
+      </p>
+    </div>
+  )}
+
+  <h2>Baseline comparison</h2>
+  <p class="note">
+    The bar the model has to clear before anything is published here. Us vs.
+    sort-by-gap vs. sort-by-RVOL, on mean opening-range magnitude. Rolling 30 sessions
+    once there is data.
+  </p>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Session</th>
+          <th class="num">Us</th>
+          <th class="num">Sort-by-gap</th>
+          <th class="num">Sort-by-RVOL</th>
+          <th class="num">Universe avg</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && (
+          <tr>
+            <td>—</td>
+            <td class="num">—</td>
+            <td class="num">—</td>
+            <td class="num">—</td>
+            <td class="num">—</td>
+          </tr>
+        )}
+        {rows.map((r) => (
+          <tr>
+            <td>{r.session_date}</td>
+            <td class="num">{r.our_mean_range !== null ? `${r.our_mean_range.toFixed(2)}%` : '—'}</td>
+            <td class="num">{r.naive_mean_range !== null ? `${r.naive_mean_range.toFixed(2)}%` : '—'}</td>
+            <td class="num">{r.rvol_mean_range !== null ? `${r.rvol_mean_range.toFixed(2)}%` : '—'}</td>
+            <td class="num">{r.universe_mean_range !== null ? `${r.universe_mean_range.toFixed(2)}%` : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</Base>

@@ -1,0 +1,40 @@
+---
+import '../styles/global.css';
+
+interface Props {
+  title: string;
+  active?: 'health' | 'freshness' | 'scoreboard' | '';
+}
+
+const { title, active = '' } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} — premonition</title>
+    <!-- Unlisted dashboard: not linked from anywhere public, and explicitly
+         told not to be indexed even if the URL leaks. -->
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="googlebot" content="noindex, nofollow" />
+  </head>
+  <body>
+    <nav class="topnav">
+      <div class="wrap">
+        <a class="brand" href="/">premonition</a>
+        <a class="navlink" href="/health" aria-current={active === 'health' ? 'page' : undefined}>Watchlist Health</a>
+        <a class="navlink" href="/freshness" aria-current={active === 'freshness' ? 'page' : undefined}>Data Freshness</a>
+        <a class="navlink" href="/scoreboard" aria-current={active === 'scoreboard' ? 'page' : undefined}>Scoreboard</a>
+      </div>
+    </nav>
+    <main class="wrap">
+      <slot />
+      <footer class="pagefoot">
+        A scanner, not an advisor. It hands over evidence, not decisions — no trade recommendations
+        appear anywhere on this dashboard.
+      </footer>
+    </main>
+  </body>
+</html>

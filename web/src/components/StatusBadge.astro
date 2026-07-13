@@ -1,0 +1,20 @@
+---
+import { healthStatusInfo, fieldStatusInfo } from '../lib/statusMeta';
+
+interface Props {
+  status: string;
+  kind: 'health' | 'field';
+}
+
+const { status, kind } = Astro.props;
+
+const cls = kind === 'health'
+  ? `badge role-${healthStatusInfo(status).role}`
+  : `badge tone-${fieldStatusInfo(status).tone}`;
+const info = kind === 'health' ? healthStatusInfo(status) : fieldStatusInfo(status);
+---
+
+<span class={cls}>
+  <span class="dot" aria-hidden="true">{info.icon}</span>
+  {info.label}
+</span>

@@ -1,0 +1,187 @@
+---
+import Base from '../layouts/Base.astro';
+import StatusBadge from '../components/StatusBadge.astro';
+import { supabase, supabaseConfigured, supabaseConfigError } from '../lib/supabase';
+
+interface SourceFreshnessRow {
+  probe: string;
+  source: string;
+  sample_count: number;
+  median_lag_secs: number | null;
+  min_lag_secs: number | null;
+  max_lag_secs: number | null;
+  attempt_count: number;
+  error_count: number;
+  error_rate: number | null;
+  last_error: string | null;
+  window_start: string | null;
+  window_end: string | null;
+}
+
+interface FieldBehaviorRow {
+  field: string;
+  yahoo_field_name: string;
+  status: string;
+  evidence_note: string | null;
+  distinct_values_before_close: number | null;
+  distinct_values_after_close: number | null;
+  ticks_after_close: number;
+  tickers_covered: string[] | null;
+  window_start: string | null;
+  window_end: string | null;
+  computed_at: string;
+}
+
+let sourceRows: SourceFreshnessRow[] = [];
+let fieldRows: FieldBehaviorRow[] = [];
+let queryError: string | null = null;
+
+if (supabaseConfigured && supabase) {
+  const [sourceRes, fieldRes] = await Promise.all([
+    supabase.from('probe_source_freshness').select('*').order('source'),
+    supabase.from('probe_field_behavior').select('*'),
+  ]);
+  if (sourceRes.error) queryError = sourceRes.error.message;
+  else sourceRows = sourceRes.data ?? [];
+  if (!queryError && fieldRes.error) queryError = fieldRes.error.message;
+  else if (!queryError) fieldRows = fieldRes.data ?? [];
+}
+
+function fmtSecs(s: number | null): string {
+  if (s === null || s === undefined) return '—';
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const m = Math.floor(s / 60);
+  const rem = Math.round(s % 60);
+  return `${m}m ${rem}s`;
+}
+
+function fmtPct(p: number | null): string {
+  if (p === null || p === undefined) return '—';
+  return `${(p * 100).toFixed(0)}%`;
+}
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+}
+
+// Group field rows by which session they belong to, for a readable layout.
+const fieldOrder = [
+  'regular_market_price', 'regular_market_volume', 'regular_market_time',
+  'premarket_price', 'premarket_volume', 'premarket_time',
+  'postmarket_price', 'postmarket_volume', 'postmarket_time',
+];
+const sortedFieldRows = [...fieldRows].sort(
+  (a, b) => fieldOrder.indexOf(a.field) - fieldOrder.indexOf(b.field)
+);
+---
+
+<Base title="Data Freshness" active="freshness">
+  <h1>Data Freshness</h1>
+  <p class="lede">
+    The whole project rests on one unverified assumption: that a free source can give us a
+    fresh pre-market price and volume at 09:15 ET, accurately enough to rank 91 tickers.
+    This page is that assumption's report card — straight from what Probe A/B actually
+    measured, not a claim about what "should" be true.
+  </p>
+
+  {!supabaseConfigured && (
+    <div class="error-block">
+      <strong>Not connected.</strong>
+      {supabaseConfigError}
+    </div>
+  )}
+
+  {supabaseConfigured && queryError && (
+    <div class="error-block">
+      <strong>Query failed.</strong>
+      {queryError}
+    </div>
+  )}
+
+  {supabaseConfigured && !queryError && sourceRows.length === 0 && fieldRows.length === 0 && (
+    <div class="empty-block">
+      <strong>No freshness data published yet.</strong>
+      Run <code>python3 -m publish.freshness</code> from the agents laptop after a probe
+      run to populate this page from <code>/srv/premonition/db/probe.sqlite</code>.
+    </div>
+  )}
+
+  {sourceRows.length > 0 && (
+    <>
+      <h2>Per-source lag</h2>
+      <p class="note">
+        Lag is <code>fetched_at − source_ts</code>: how old the datapoint already was the
+        moment we received it, by our own clock — not an estimate.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Probe</th>
+              <th class="num">Samples</th>
+              <th class="num">Median lag</th>
+              <th class="num">Min–max lag</th>
+              <th class="num">Errors</th>
+              <th>Last error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sourceRows.map((r) => (
+              <tr>
+                <td><strong>{r.source}</strong></td>
+                <td>{r.probe}</td>
+                <td class="num">{r.sample_count}</td>
+                <td class="num">{fmtSecs(r.median_lag_secs)}</td>
+                <td class="num">{fmtSecs(r.min_lag_secs)} – {fmtSecs(r.max_lag_secs)}</td>
+                <td class="num">{r.error_count} / {r.attempt_count} ({fmtPct(r.error_rate)})</td>
+                <td>{r.last_error ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+
+  {sortedFieldRows.length > 0 && (
+    <>
+      <h2>Which Yahoo fields freeze after the close</h2>
+      <p class="note">
+        Measured across the 15:55–18:00 ET after-hours window. The question this answers:
+        if a field still reads a valid-looking number after the market state changes, it
+        could pass for live when it isn't — which is exactly the failure mode that would
+        make the 09:15 lock worthless. "Frozen" is based on the trailing run of ticks, not
+        the whole window — a field that corrected itself right after the close and then
+        held steady counts as frozen, same as one that never moved at all.
+      </p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Behavior</th>
+              <th>Evidence</th>
+              <th class="num">Ticks after close</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedFieldRows.map((r) => (
+              <tr>
+                <td><code>{r.yahoo_field_name}</code></td>
+                <td><StatusBadge status={r.status} kind="field" /></td>
+                <td>{r.evidence_note ?? '—'}</td>
+                <td class="num">{r.ticks_after_close}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        Tickers covered: {sortedFieldRows[0]?.tickers_covered?.join(', ') ?? '—'}. Window:{' '}
+        {fmtTime(sortedFieldRows[0]?.window_start ?? null)} to {fmtTime(sortedFieldRows[0]?.window_end ?? null)}.
+      </p>
+    </>
+  )}
+</Base>

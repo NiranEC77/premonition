@@ -1,0 +1,118 @@
+---
+import Base from '../layouts/Base.astro';
+import StatusBadge from '../components/StatusBadge.astro';
+import { supabase, supabaseConfigured, supabaseConfigError } from '../lib/supabase';
+
+interface TickerHealthRow {
+  ticker: string;
+  status: string;
+  reason: string | null;
+  cluster: string | null;
+  missing: string[] | null;
+  checked_at: string;
+}
+
+let rows: TickerHealthRow[] = [];
+let queryError: string | null = null;
+
+if (supabaseConfigured && supabase) {
+  const { data, error } = await supabase
+    .from('ticker_health')
+    .select('ticker, status, reason, cluster, missing, checked_at')
+    .order('ticker');
+  if (error) queryError = error.message;
+  else rows = data ?? [];
+}
+
+const total = rows.length;
+const okCount = rows.filter((r) => r.status === 'ok').length;
+const attention = rows
+  .filter((r) => r.status !== 'ok')
+  .sort((a, b) => a.ticker.localeCompare(b.ticker));
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+}
+---
+
+<Base title="Watchlist Health" active="health">
+  <h1>Watchlist Health</h1>
+  <p class="lede">
+    Every ticker on the watchlist carries a visible state — a name we can't see is a fact
+    she needs, not something to hide. This is the seed's manual audit, not a live
+    collector check: automated per-tick data-quality monitoring lands once collectors
+    exist (Phase 2). <code>ok</code> here means "nothing wrong was found in the watchlist
+    seed," not "verified healthy right now."
+  </p>
+
+  {!supabaseConfigured && (
+    <div class="error-block">
+      <strong>Not connected.</strong>
+      {supabaseConfigError}
+    </div>
+  )}
+
+  {supabaseConfigured && queryError && (
+    <div class="error-block">
+      <strong>Query failed.</strong>
+      {queryError}
+    </div>
+  )}
+
+  {supabaseConfigured && !queryError && total === 0 && (
+    <div class="empty-block">
+      <strong>No health data published yet.</strong>
+      Run <code>python3 -m publish.health</code> from the agents laptop to populate
+      <code>ticker_health</code> from <code>universe.yaml</code>.
+    </div>
+  )}
+
+  {total > 0 && (
+    <>
+      <div class="stat-tile">
+        <span class="value">{okCount} of {total}</span>
+        <span class="label">healthy</span>
+      </div>
+
+      {attention.length > 0 && (
+        <div class="attention-panel">
+          <h2>Needs attention ({attention.length})</h2>
+          <ul>
+            {attention.map((r) => (
+              <li>
+                <StatusBadge status={r.status} kind="health" /> <strong>{r.ticker}</strong>
+                {r.reason ? ` — ${r.reason}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <h2>All {total} tickers</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Status</th>
+              <th>Cluster</th>
+              <th>Reason</th>
+              <th>Checked</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr>
+                <td><strong>{r.ticker}</strong></td>
+                <td><StatusBadge status={r.status} kind="health" /></td>
+                <td>{r.cluster ?? '—'}</td>
+                <td>{r.reason ?? '—'}</td>
+                <td>{fmtTime(r.checked_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+</Base>

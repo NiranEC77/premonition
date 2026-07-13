@@ -49,7 +49,12 @@ clusters:
 
   power_nuclear:
     driver: datacenter power narrative, SMR policy headlines
-    tickers: [OKLO, BE, EOSE, FCEL, POWL, VRT, PSIX]
+    # NVTS (Navitas Semiconductor, GaN power ICs marketed for AI-datacenter power
+    # delivery) was in schema.sql's 91-ticker seed and in watch_for_illiquidity below,
+    # but missing from every cluster list — found 2026-07-13 while publishing
+    # ticker_health, when the cluster total came up 90, not the 91 meta.count claims.
+    # Placed here on thematic fit; confirm this is the intended cluster.
+    tickers: [OKLO, BE, EOSE, FCEL, POWL, VRT, PSIX, NVTS]
 
   neoclouds:
     driver: AI compute demand, hyperscaler contracts

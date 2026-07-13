@@ -1,0 +1,27 @@
+---
+import Base from '../layouts/Base.astro';
+---
+
+<Base title="Dashboard" active="">
+  <h1>premonition</h1>
+  <p class="lede">
+    A pre-market scanner for the opening bell. This dashboard is the operational view of
+    what the system can currently see — it does not publish picks, scores, or trade
+    recommendations. The backtest gate that would allow that has not been passed yet.
+  </p>
+
+  <div class="card-grid">
+    <a class="card" href="/health">
+      <h3>Watchlist Health</h3>
+      <p>All 91 tickers and what state each one is in — resolved, flagged, or unresolved.</p>
+    </a>
+    <a class="card" href="/freshness">
+      <h3>Data Freshness</h3>
+      <p>How stale is each free data source, and which Yahoo fields actually stay live after the close.</p>
+    </a>
+    <a class="card" href="/scoreboard">
+      <h3>Scoreboard</h3>
+      <p>Where the model's track record against the naive baseline will be published — once there is one.</p>
+    </a>
+  </div>
+</Base>
