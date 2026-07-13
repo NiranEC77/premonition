@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""bin/premonition-probe — runner for Probe A (freshness) and Probe B (friction).
+
+Usage:
+    bin/premonition-probe --probe a --start 08:00 --end 09:30
+    bin/premonition-probe --probe b --start 08:00 --end 09:30
+    bin/premonition-probe --probe a --once                 # single tick, for smoke-testing
+
+Both probes only ever poll and record. See probes/freshness.py and
+probes/friction.py for what each tick does; see probes/db.py for the schema.
+This script's only job is scheduling ticks inside the [start, end) window and
+making sure one slow or failing tick never derails the rest of the run.
+"""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import os
+import sys
+import time
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from probes import db, freshness, friction  # noqa: E402
+
+ET = ZoneInfo("America/New_York")
+DEFAULT_TICKERS = ["NVDA", "AAPL", "SMCI", "RGTI", "POET", "SPCX"]
+DEFAULT_INTERVAL_SECS = 30
+DEFAULT_LOG_DIR = "/srv/premonition/logs"
+
+PROBE_MODULES = {"a": freshness, "b": friction}
+PROBE_NAMES = {"a": "freshness", "b": "friction"}
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Run a premonition data-freshness/friction probe.")
+    p.add_argument("--probe", required=True, choices=["a", "A", "b", "B"],
+                    help="a = freshness (Probe A), b = friction (Probe B)")
+    p.add_argument("--start", default=None, help="HH:MM in ET, e.g. 08:00")
+    p.add_argument("--end", default=None, help="HH:MM in ET, e.g. 09:30")
+    p.add_argument("--date", default=None,
+                    help="Trading date (YYYY-MM-DD, ET) for --start/--end. Defaults to today.")
+    p.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECS,
+                    help=f"Seconds between ticks (default {DEFAULT_INTERVAL_SECS})")
+    p.add_argument("--tickers", default=None,
+                    help="Comma-separated tickers (default: the six liquidity-spanning probe names)")
+    p.add_argument("--db", default=db.DEFAULT_DB_PATH, help="Path to probe.sqlite")
+    p.add_argument("--log-dir", default=DEFAULT_LOG_DIR, help="Directory for the run log")
+    p.add_argument("--once", action="store_true",
+                    help="Run a single tick immediately and exit, ignoring --start/--end. For smoke tests.")
+    args = p.parse_args(argv)
+
+    if not args.once and (args.start is None or args.end is None):
+        p.error("--start and --end are required unless --once is given")
+    return args
+
+
+def _parse_et_time(hhmm: str, on_date: date) -> datetime:
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    return datetime(on_date.year, on_date.month, on_date.day, hour, minute, tzinfo=ET)
+
+
+def setup_logging(log_dir: str, probe_name: str) -> logging.Logger:
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(ET).strftime("%Y-%m-%d")
+    log_path = Path(log_dir) / f"probe-{probe_name}-{stamp}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.FileHandler(log_path), logging.StreamHandler(sys.stdout)],
+    )
+    logger = logging.getLogger("premonition.probe.runner")
+    logger.info("logging to %s", log_path)
+    return logger
+
+
+def run(args: argparse.Namespace) -> int:
+    probe_key = args.probe.lower()
+    probe_name = PROBE_NAMES[probe_key]
+    module = PROBE_MODULES[probe_key]
+    tickers = args.tickers.split(",") if args.tickers else DEFAULT_TICKERS
+    finnhub_api_key = os.environ.get("FINNHUB_API_KEY")
+
+    logger = setup_logging(args.log_dir, probe_name)
+    if not finnhub_api_key:
+        logger.warning("FINNHUB_API_KEY is not set — finnhub_quote rows will record that "
+                        "as an error on every tick, which is itself a valid result, not a bug.")
+
+    conn = db.connect(args.db)
+    logger.info("probe=%s tickers=%s interval=%ss db=%s", probe_name, tickers, args.interval, args.db)
+
+    if args.once:
+        t0 = time.monotonic()
+        module.collect_tick(conn, tickers, finnhub_api_key)
+        logger.info("single tick complete in %.1fs", time.monotonic() - t0)
+        conn.close()
+        return 0
+
+    on_date = (datetime.strptime(args.date, "%Y-%m-%d").date()
+               if args.date else datetime.now(ET).date())
+    start_dt = _parse_et_time(args.start, on_date)
+    end_dt = _parse_et_time(args.end, on_date)
+    if end_dt <= start_dt:
+        logger.error("--end (%s) must be after --start (%s)", args.end, args.start)
+        return 1
+
+    now = datetime.now(ET)
+    if now < start_dt:
+        wait = (start_dt - now).total_seconds()
+        logger.info("waiting %.0fs for window to open at %s ET", wait, start_dt.time())
+        time.sleep(wait)
+    elif now >= end_dt:
+        logger.error("window %s-%s ET on %s has already closed (now %s)",
+                      args.start, args.end, on_date, now.time())
+        return 1
+
+    tick_count = 0
+    next_tick = datetime.now(ET)
+    while True:
+        now = datetime.now(ET)
+        if now >= end_dt:
+            break
+
+        t0 = time.monotonic()
+        try:
+            module.collect_tick(conn, tickers, finnhub_api_key)
+        except Exception:  # noqa: BLE001 — a whole-tick failure must not end the run early
+            logger.exception("tick failed outright — this should not happen, "
+                              "since collect_tick catches per-source errors; continuing anyway")
+        elapsed = time.monotonic() - t0
+        tick_count += 1
+
+        if elapsed > args.interval:
+            logger.warning("tick %d took %.1fs, longer than the %ss interval — "
+                            "sources are slow, not skipping the next tick to compensate",
+                            tick_count, elapsed, args.interval)
+        else:
+            logger.info("tick %d complete in %.1fs", tick_count, elapsed)
+
+        next_tick = next_tick + timedelta(seconds=args.interval)
+        sleep_for = (next_tick - datetime.now(ET)).total_seconds()
+        if sleep_for > 0:
+            time.sleep(sleep_for)
+        else:
+            next_tick = datetime.now(ET)  # fell behind; resync instead of tick-storming
+
+    logger.info("window closed after %d ticks", tick_count)
+    conn.close()
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv if argv is not None else sys.argv[1:])
+    return run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
