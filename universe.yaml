@@ -1,0 +1,120 @@
+# universe.yaml — premonition watchlist
+#
+# This file is the SEED. It is not the system of record.
+# Once Supabase is live, the universe is reconstructed from the append-only
+# `watchlist_events` table so that any past date can be replayed with the list
+# as it stood THEN. Editing this file after that point will silently corrupt
+# the backtest through survivorship bias.
+#
+# clusters here are a SEED too. The real clusters are derived weekly from
+# sector + trailing-90d return correlation, so that tickers nobody mapped by
+# hand still get de-duplicated correctly.
+#
+# status values: ok | recent_ipo | unresolved | needs_confirmation
+
+meta:
+  seeded: 2026-07-13
+  count: 91
+  character: >
+    High-beta AI-infrastructure barbell. Heavy concentration in AI semis/optics,
+    crypto miners, quantum, space, and datacenter power. Very few defensive names.
+    Expect correlated cluster days. Cluster de-duplication is not optional.
+
+clusters:
+
+  crypto_complex:
+    driver: BTC price (trades 24/7 — our single best free overnight signal)
+    tickers: [MSTR, COIN, MARA, IREN, WULF, APLD, HOOD, CRCL, CIFER]
+
+  quantum:
+    driver: sentiment, single funding or contract headlines; extremely low float
+    warning: halt-prone, wide spreads — tradability gate will fire here often
+    tickers: [QBTS, QUBT, RGTI]
+
+  space:
+    driver: launches, contract awards, government budget headlines
+    tickers: [SPCX, ASTS, RKLB, LUNR, RDW, GSAT, IRDM]
+
+  ai_semis_optics:
+    driver: NVDA + hyperscaler capex commentary
+    tickers: [NVDA, AMD, MRVL, CRDO, ALAB, COHR, LITE, AAOI, FN, CIEN, POET, ARM, INTC, TSM]
+
+  semicap:
+    driver: TSM/ASML datapoints; TSM trades in Taipei overnight and leads this complex
+    tickers: [LRCX, MKSI, NVMI, AEIS, RMBS]
+
+  memory_storage:
+    driver: DRAM / NAND pricing
+    tickers: [MU, WDC, STX, SNDK]
+
+  power_nuclear:
+    driver: datacenter power narrative, SMR policy headlines
+    tickers: [OKLO, BE, EOSE, FCEL, POWL, VRT, PSIX]
+
+  neoclouds:
+    driver: AI compute demand, hyperscaler contracts
+    tickers: [CRWV, NBIS]
+
+  megacap_software:
+    driver: idiosyncratic
+    tickers: [AAPL, MSFT, GOOG, AMZN, META, NFLX, ORCL, NOW, TSLA, BABA, SPOT,
+              SHOP, TWLO, TEAM, DDOG, OKTA, ZS, TTD, RBLX, ROKU, RDDT, PLTR,
+              APP, ANET, ZETA, W]
+
+  materials_industrial:
+    driver: commodity prices, tariffs
+    tickers: [FCX, MP, CF, HON, SEI, CCL]
+
+  healthcare:
+    driver: trial data, FDA dates
+    tickers: [RVMD, TEM, ICLR]
+
+  unclassified:
+    tickers: [SMCI, CBRS, TE, ECHO]
+
+# ---------------------------------------------------------------------------
+# Tickers needing special handling. The dashboard shows these states; it does
+# not hide them.
+# ---------------------------------------------------------------------------
+
+flags:
+
+  SPCX:
+    status: recent_ipo
+    note: >
+      SpaceX. IPO'd Nasdaq 2026-06-12, added to Nasdaq 100. Roughly one month of
+      price history, so gap distribution, ATR, and realized vol are ALL undefined.
+      Must take the recent_ipo scoring path — do not let a short window silently
+      produce a confident-looking normalized score.
+    catalyst: >
+      IPO lockup expiry (approx. December 2026) is one of the largest scheduled
+      catalysts on this entire watchlist. Put it on the calendar now.
+
+  SNDK:
+    status: recent_ipo
+    note: 2025 spinoff from WDC. Short history. Same class of problem as SPCX, smaller.
+
+  CIFER:
+    status: needs_confirmation
+    note: Not a recognized symbol. Almost certainly a typo for CIFR (Cipher Mining).
+    suggest: CIFR
+
+  TE:
+    status: needs_confirmation
+    note: TE Connectivity trades as TEL, not TE. Confirm intent.
+    suggest: TEL
+
+  ECHO:
+    status: needs_confirmation
+    note: Echo Global Logistics was taken private. Symbol likely dead. Confirm intent.
+
+  CBRS:
+    status: needs_confirmation
+    note: >
+      Not a recognized US equity. CBRS is a radio spectrum band. Confirm intent —
+      possibly a typo.
+
+# Names likely to trip the tradability gate on any given morning: thin pre-market
+# volume, wide spreads, small float, LULD halt history. Not excluded here — the
+# gate decides each morning on live data. Listed so nobody is surprised.
+watch_for_illiquidity: [QUBT, QBTS, RGTI, PSIX, POET, EOSE, FCEL, RDW, AAOI, NVTS, GSAT]
