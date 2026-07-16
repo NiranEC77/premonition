@@ -6,15 +6,26 @@ was diagnostic latency/friction evidence, not a feature store). Same rule as
 everywhere else in this project: every value carries its source and
 fetched_at, and a missing value is a NULL row, never a zero.
 
-Known, load-bearing limitation (found 2026-07-13, see RUNBOOK.md): yfinance's
-free chart API reports ZERO volume for every extended-hours (pre-market and
-post-market) minute bar — confirmed across three tickers over 7 real trading
-days, and confirmed again in tonight's real after-hours probe run. Price
-updates correctly in extended hours; volume does not, from bars. The only
-other candidate is the quoteSummary `preMarketVolume` field, whose behavior
-during a real PRE state is UNKNOWN until tomorrow's live 08:00-09:30 ET probe
-run. `quotes.premarket_volume_source` records which method (if either)
-actually produced a number, so this is never silently faked.
+Known, load-bearing limitation (found 2026-07-13, confirmed at full-universe
+scale on the live 2026-07-14 lock run — see devlog.md): yfinance's free chart
+API reports ZERO volume for every extended-hours (pre-market and post-market)
+minute bar, for every ticker, structurally — not a fluke, not source-specific
+to a few names. Price updates correctly in extended hours; volume does not,
+from bars. `quotes.premarket_volume_source` records which method actually
+produced a number, so this was never silently faked.
+
+As of 2026-07-16, Alpaca's IEX feed (real, paid-account-adjacent market
+data, not Yahoo's free chart API) is the PRIMARY source for premarket_price/
+volume/bid/ask — see seismo/collect_quotes.py and probes/sources.py's
+alpaca_quote/alpaca_bars_1m adapters. yfinance is the fallback when Alpaca
+has no data for a ticker. Neither source is trusted blindly: every quote
+that reaches this table has passed probes/quote_sanity.py's freshness and
+spread-sanity gates first — see `quotes.quote_sanity_status`. A quote that
+fails either gate is NOT written here with a garbage price; the ticker's
+price/bid/ask/premarket_* fields are left NULL and the rejection is logged
+to /srv/premonition/logs/quote-sanity-rejects.jsonl instead, so the
+tradability gate naturally excludes it as insufficient data rather than
+ranking on a frozen or nonsensical number.
 """
 
 from __future__ import annotations
@@ -99,7 +110,10 @@ CREATE TABLE IF NOT EXISTS quotes (
     premarket_volume_source  TEXT,              -- 'quote_field' | 'bar_sum_completed' | NULL (unavailable)
     bid                      REAL,
     ask                      REAL,
-    source                   TEXT    NOT NULL,
+    spread_width             REAL,              -- ask - bid, in price units
+    quote_sanity_status      TEXT,              -- 'ok' | 'no_quote' | 'crossed' | 'stale' | 'implausible_spread'
+    quote_sanity_reason      TEXT,
+    source                   TEXT    NOT NULL,   -- 'alpaca' | 'yfinance_quote' (whichever actually supplied this row)
     fetched_at               TEXT    NOT NULL
 );
 
@@ -120,7 +134,7 @@ CREATE TABLE IF NOT EXISTS premarket_volume_history (
     PRIMARY KEY (ticker, date)
 );
 
--- Overnight world signals: BTC-USD, ETH-USD, ES=F, NQ=F, ^N225, ^TWII, ^GDAXI, DX-Y.NYB.
+-- Overnight world signals: BTC-USD, ETH-USD, ES=F, NQ=F, CL=F, ^N225, ^TWII, ^GDAXI, DX-Y.NYB.
 CREATE TABLE IF NOT EXISTS macro_quotes (
     symbol        TEXT    PRIMARY KEY,
     label         TEXT    NOT NULL,
@@ -129,6 +143,21 @@ CREATE TABLE IF NOT EXISTS macro_quotes (
     change_pct    REAL,
     source        TEXT    NOT NULL,
     fetched_at    TEXT    NOT NULL
+);
+
+-- A live snapshot, not a history — wiped and reloaded every collect_macro_news
+-- run (see that module's docstring for why). The PUBLISHED brief's
+-- macro_headlines field is the historical record of what was actually shown
+-- on a given morning; this table is just today's working data.
+CREATE TABLE IF NOT EXISTS macro_headlines (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    headline     TEXT    NOT NULL,
+    source       TEXT    NOT NULL,
+    source_url   TEXT,
+    published_at TEXT,
+    category     TEXT    NOT NULL,   -- which keyword theme matched: 'fed_rates' | 'oil_energy' |
+                                      -- 'semis_export_controls' | 'crypto' | 'geopolitical'
+    fetched_at   TEXT    NOT NULL
 );
 """
 
@@ -139,7 +168,10 @@ CREATE TABLE IF NOT EXISTS macro_quotes (
 _COLUMN_MIGRATIONS = {
     "earnings_dates": [("error", "TEXT")],
     "fundamentals": [("company_name", "TEXT")],
-    "quotes": [("premarket_high", "REAL"), ("premarket_low", "REAL")],
+    "quotes": [
+        ("premarket_high", "REAL"), ("premarket_low", "REAL"),
+        ("spread_width", "REAL"), ("quote_sanity_status", "TEXT"), ("quote_sanity_reason", "TEXT"),
+    ],
 }
 
 

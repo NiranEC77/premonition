@@ -85,18 +85,24 @@ def run(args: argparse.Namespace) -> int:
     module = PROBE_MODULES[probe_key]
     tickers = args.tickers.split(",") if args.tickers else DEFAULT_TICKERS
     finnhub_api_key = os.environ.get("FINNHUB_API_KEY")
+    alpaca_key_id = os.environ.get("ALPACA_API_KEY_ID")
+    alpaca_secret_key = os.environ.get("ALPACA_API_SECRET_KEY")
 
     logger = setup_logging(args.log_dir, probe_name)
     if not finnhub_api_key:
         logger.warning("FINNHUB_API_KEY is not set — finnhub_quote rows will record that "
                         "as an error on every tick, which is itself a valid result, not a bug.")
+    if not (alpaca_key_id and alpaca_secret_key):
+        logger.warning("ALPACA_API_KEY_ID/ALPACA_API_SECRET_KEY not set — alpaca_quote/alpaca_bars_1m "
+                        "rows will record that as an error on every tick, which is itself a valid "
+                        "result, not a bug.")
 
     conn = db.connect(args.db)
     logger.info("probe=%s tickers=%s interval=%ss db=%s", probe_name, tickers, args.interval, args.db)
 
     if args.once:
         t0 = time.monotonic()
-        module.collect_tick(conn, tickers, finnhub_api_key)
+        module.collect_tick(conn, tickers, finnhub_api_key, alpaca_key_id, alpaca_secret_key)
         logger.info("single tick complete in %.1fs", time.monotonic() - t0)
         conn.close()
         return 0
@@ -128,7 +134,7 @@ def run(args: argparse.Namespace) -> int:
 
         t0 = time.monotonic()
         try:
-            module.collect_tick(conn, tickers, finnhub_api_key)
+            module.collect_tick(conn, tickers, finnhub_api_key, alpaca_key_id, alpaca_secret_key)
         except Exception:  # noqa: BLE001 — a whole-tick failure must not end the run early
             logger.exception("tick failed outright — this should not happen, "
                               "since collect_tick catches per-source errors; continuing anyway")

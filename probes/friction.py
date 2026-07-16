@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from probes import db, sources
+from probes import db, quote_sanity, sources
 
 logger = logging.getLogger("premonition.probe.friction")
 
@@ -57,10 +57,29 @@ def _with_spread_proxy(row: dict) -> dict:
     return row
 
 
-def collect_tick(conn: sqlite3.Connection, tickers: list[str], finnhub_api_key: str | None) -> None:
+def _apply_sanity(row: dict) -> dict:
+    """Two gates, not optional: is this bid/ask actually fresh, and is the
+    gap even plausible? See probes/quote_sanity.py. The probe only RECORDS
+    the verdict here — a probe's job is to show what a source returned,
+    garbage included, never to filter it."""
+    result = quote_sanity.check_quote_sanity(
+        row.get("bid"), row.get("ask"), row.get("source_ts"), row.get("fetched_at"))
+    row["quote_sanity_status"] = result["sanity_status"]
+    row["quote_sanity_reason"] = result["sanity_reason"]
+    row["quote_age_secs"] = result["quote_age_secs"]
+    row["spread_width"] = result["spread_width"]
+    row["quote_sanity_formula"] = result["quote_sanity_formula"]
+    return row
+
+
+def collect_tick(conn: sqlite3.Connection, tickers: list[str], finnhub_api_key: str | None,
+                  alpaca_key_id: str | None = None, alpaca_secret_key: str | None = None) -> None:
     """One polling round: bid/ask sources plus the daily-bar proxy, every ticker, once."""
+    alpaca_quotes = sources.fetch_alpaca_quotes_batch(PROBE, tickers, alpaca_key_id, alpaca_secret_key)
+
     for ticker in tickers:
-        # Bid/ask — yfinance's info dict is the only free source that carries it at all.
+        # Bid/ask — yfinance's info dict is the only free source besides
+        # Alpaca that carries it at all.
         try:
             row = sources.fetch_yfinance_quote(PROBE, ticker)
         except Exception as e:  # noqa: BLE001
@@ -70,11 +89,26 @@ def collect_tick(conn: sqlite3.Connection, tickers: list[str], finnhub_api_key: 
                 "fetched_at": sources.now_iso(), "status": "error",
                 "error": f"unhandled {type(e).__name__}: {e}", "raw_payload": "{}",
             }
+        if row.get("status") == "ok":
+            row = _apply_sanity(row)
         db.insert_observation(conn, row)
         if row.get("status") != "ok":
             logger.info("yfinance_quote %s: %s (%s)", ticker, row.get("status"), row.get("error"))
         elif row.get("bid") is None and row.get("ask") is None:
             logger.info("yfinance_quote %s: ok but no bid/ask in payload", ticker)
+        elif row.get("quote_sanity_status") != "ok":
+            logger.info("yfinance_quote %s: sanity=%s (%s)", ticker,
+                         row.get("quote_sanity_status"), row.get("quote_sanity_reason"))
+
+        # Alpaca IEX — real bid/ask, batched across all tickers (see
+        # probes/sources.py). Sanity-checked the same way.
+        alpaca_row = _apply_sanity(alpaca_quotes[ticker])
+        db.insert_observation(conn, alpaca_row)
+        if alpaca_row.get("status") != "ok":
+            logger.info("alpaca_quote %s: %s (%s)", ticker, alpaca_row.get("status"), alpaca_row.get("error"))
+        elif alpaca_row.get("quote_sanity_status") != "ok":
+            logger.info("alpaca_quote %s: sanity=%s (%s)", ticker,
+                         alpaca_row.get("quote_sanity_status"), alpaca_row.get("quote_sanity_reason"))
 
         # Finnhub free quote — recorded for completeness; its free tier has no bid/ask field.
         try:

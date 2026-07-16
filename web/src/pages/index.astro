@@ -2,6 +2,8 @@
 import Base from '../layouts/Base.astro';
 import PickCard from '../components/PickCard.astro';
 import ShadowModeBanner from '../components/ShadowModeBanner.astro';
+import MarketContext from '../components/MarketContext.astro';
+import MacroNews from '../components/MacroNews.astro';
 import { supabase, supabaseConfigured, supabaseConfigError } from '../lib/supabase';
 
 const MIN_SESSIONS_FOR_VERDICT = 20;
@@ -14,8 +16,21 @@ interface BaselineRow {
   our_mean_range: number | null;
 }
 
+interface MarketTile {
+  level: number;
+  change_abs: number | null;
+  change_pct: number | null;
+  flag_color: 'red' | 'yellow' | 'green';
+  flag_emoji: string;
+  flag_message: string;
+}
+
 let baselineRows: BaselineRow[] = [];
-let latestBrief: { id: number; session_date: string; shadow_mode: boolean; cluster_story: string | null } | null = null;
+let latestBrief: {
+  id: number; session_date: string; shadow_mode: boolean; cluster_story: string | null;
+  market_context: { nq: MarketTile | null; cl: MarketTile | null } | null;
+  macro_headlines: { headline: string; source: string; source_url: string | null; published_at: string | null; category: string }[] | null;
+} | null = null;
 let picks: any[] = [];
 let queryError: string | null = null;
 
@@ -23,7 +38,7 @@ if (supabaseConfigured && supabase) {
   const [baselineRes, briefRes] = await Promise.all([
     supabase.from('baselines').select('session_date, naive_mean_range, rvol_mean_range, universe_mean_range, our_mean_range')
       .order('session_date', { ascending: false }),
-    supabase.from('briefs').select('id, session_date, shadow_mode, cluster_story')
+    supabase.from('briefs').select('id, session_date, shadow_mode, cluster_story, market_context, macro_headlines')
       .eq('stage', 'lock').eq('status', 'published')
       .order('session_date', { ascending: false }).limit(1),
   ]);
@@ -125,6 +140,13 @@ for (const b of gradedSessions) {
 
   {latestBrief?.cluster_story && (
     <p class="lede">{latestBrief.cluster_story}</p>
+  )}
+
+  {latestBrief && (
+    <>
+      <MarketContext nq={latestBrief.market_context?.nq ?? null} cl={latestBrief.market_context?.cl ?? null} />
+      <MacroNews headlines={latestBrief.macro_headlines ?? null} />
+    </>
   )}
 
   {supabaseConfigured && !queryError && !latestBrief && (

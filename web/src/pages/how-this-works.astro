@@ -23,6 +23,61 @@ import Base from '../layouts/Base.astro';
     trading history yet) called out clearly rather than buried in a number.
   </p>
 
+  <h2>Can I trust these numbers?</h2>
+  <p class="lede">
+    A quote is two live offers, side by side: the highest price anyone is willing to pay right
+    now (the <strong>bid</strong>), and the lowest price anyone is willing to sell for (the
+    <strong>ask</strong>). When those two numbers sit close together, that's a healthy, real
+    market — people are actively trading the stock and roughly agree on what it's worth this
+    second.
+  </p>
+  <p class="lede">
+    When the market's closed, or a stock just isn't trading much, the last bid and ask freeze in
+    place — and because they froze at different moments, they can drift apart into something
+    that doesn't make sense anymore. You might see a stock's last bid sitting at $195 next to an
+    ask up at $230. That's not a typo and it's not a glitch worth panicking over — it's just what
+    a sleeping market looks like once nobody's actually making one.
+  </p>
+
+  <div class="card-grid" style="margin:18px 0 24px;">
+    <div class="card" style="border-color: var(--status-critical);">
+      <h3 style="color: var(--status-critical); margin-bottom:10px;">Sleeping — not a real quote</h3>
+      <p style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:1.1rem; margin:0 0 8px;">
+        bid $195.00 &nbsp;/&nbsp; ask $230.00
+      </p>
+      <p style="margin:0; color: var(--text-secondary); font-size:0.88rem;">
+        A 17.9% gap between two frozen leftovers. Nobody would actually trade at either price
+        right now — this name gets dropped, automatically, not ranked on this number.
+      </p>
+    </div>
+    <div class="card" style="border-color: var(--status-good);">
+      <h3 style="color: var(--status-good); margin-bottom:10px;">Live — a real market</h3>
+      <p style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:1.1rem; margin:0 0 8px;">
+        bid $195.55 &nbsp;/&nbsp; ask $195.57
+      </p>
+      <p style="margin:0; color: var(--text-secondary); font-size:0.88rem;">
+        Two cents apart, seconds old. This is what a name actually trading pre-market looks like
+        — this is the kind of quote a pick is built on.
+      </p>
+    </div>
+  </div>
+
+  <p class="lede">
+    Premonition picks at 9:15 — by then, pre-market's been trading for hours, and the names
+    actually worth watching are printing fresh, tight quotes like the second example. The
+    overnight junk is gone by the time it matters.
+  </p>
+  <p class="lede">
+    The reassurance underneath all of this: the dashboard only ever uses quotes that are both
+    live and sane at the moment it picks — checked for freshness (is this actually recent, or a
+    stale leftover?) and for a plausible spread (is this gap even realistic for this stock?). A
+    name still showing a frozen or absurd quote at 9:15 gets dropped automatically, the same way
+    the first example above would be. That's not a separate safety feature bolted on top — it's
+    the same check doing two jobs at once: it protects you from ever seeing a fabricated number,
+    and it tells the system which names are actually asleep and don't belong in the running. A
+    stock that can't produce a real quote can't produce a real, tradable move.
+  </p>
+
   <h2>What it can't tell you</h2>
   <p class="lede">
     When to press the button. Nothing can. At a two-minute hold, the tape in front of you at

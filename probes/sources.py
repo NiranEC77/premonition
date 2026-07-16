@@ -38,6 +38,33 @@ Sources implemented:
                          (c/h/l/o/pc) and a quote timestamp (t). No bid/ask,
                          no volume, on the free tier — recorded as absent,
                          never defaulted to 0.
+  - alpaca_quote       — GET /v2/stocks/quotes/latest, ALL tickers in ONE
+                         call (Alpaca's multi-symbol batch endpoint) rather
+                         than one call per ticker like everything else here —
+                         documented deviation, not an oversight; at ~90
+                         tickers, one-call-per-ticker would be both slow and
+                         needlessly close to rate limits. Free tier is the
+                         IEX feed only (~2% of consolidated volume, per
+                         DESIGN.md's open question about thin names). Every
+                         row carries Alpaca's OWN quote timestamp, unrounded,
+                         because a "successful" response on a sleeping name
+                         can still be minutes or hours stale — that is
+                         exactly what probes/quote_sanity.py's freshness gate
+                         exists to catch, not this adapter's job to hide.
+  - alpaca_bars_1m     — GET /v2/stocks/bars, batched, historical 1-minute
+                         bars from today's 04:00 ET session start, paginated
+                         via next_page_token. Same forming-bar-safe shape as
+                         yfinance_bars_1m (last completed bar's volume kept
+                         separate from the cumulative sum, which excludes the
+                         still-forming bar) — but on real IEX data, which,
+                         unlike yfinance's chart API, does NOT structurally
+                         report zero volume in extended hours. Also sums
+                         Alpaca's own per-bar trade count (`n`) into
+                         `cumulative_trade_count` — the direct answer to "how
+                         many trades actually arrived" for thin pre-market
+                         names like RGTI/POET/QUBT, which is what decides
+                         whether IEX's ~2% of the tape is enough or whether a
+                         paid SIP feed becomes necessary.
 
 Other free sources considered and rejected for this phase:
   - Yahoo's raw v7/finance/quote HTTP endpoint: returns 401 without a
@@ -51,15 +78,19 @@ Other free sources considered and rejected for this phase:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 import yfinance as yf
 
 FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+ALPACA_DATA_BASE = "https://data.alpaca.markets/v2/stocks"
+ALPACA_MAX_BAR_PAGES = 20  # hard stop so a pagination bug can never loop forever
 HTTP_TIMEOUT_SECS = 10
+ET = ZoneInfo("America/New_York")
 
 
 def now_iso() -> str:
@@ -370,3 +401,216 @@ def fetch_finnhub_quote(probe: str, ticker: str, api_key: str | None) -> dict:
     row["source_ts"] = _epoch_to_iso(data.get("t"))
     row["status"] = "ok"
     return row
+
+
+# ---------------------------------------------------------------------------
+# Alpaca IEX — batched across all tickers, not one call per ticker (see
+# module docstring for why)
+# ---------------------------------------------------------------------------
+
+def _iso_z_to_iso(ts: str | None) -> str | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _alpaca_headers(key_id: str, secret_key: str) -> dict:
+    return {"APCA-API-KEY-ID": key_id, "APCA-API-SECRET-KEY": secret_key}
+
+
+def _et_session_start_utc_iso() -> str:
+    """04:00 ET today, as a UTC ISO8601 string with a Z suffix — the same
+    pre-market window start used throughout this codebase (see
+    seismo/collect_quotes.py's _premarket_high_low)."""
+    now_et = datetime.now(ET)
+    start_et = now_et.replace(hour=4, minute=0, second=0, microsecond=0)
+    return start_et.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _alpaca_missing_key_rows(probe: str, source: str, tickers: list[str]) -> dict[str, dict]:
+    rows = {t: _base_row(probe, source, t) for t in tickers}
+    for row in rows.values():
+        row["error"] = "missing ALPACA_API_KEY_ID/ALPACA_API_SECRET_KEY"
+    return rows
+
+
+def fetch_alpaca_quotes_batch(probe: str, tickers: list[str], key_id: str | None,
+                               secret_key: str | None) -> dict[str, dict]:
+    """One HTTP call for the latest bid/ask across every ticker at once.
+    Returns {ticker: row} for every requested ticker, including any Alpaca's
+    response simply omits — recorded as no_data, never silently dropped from
+    the returned dict, so a caller iterating `tickers` never KeyErrors."""
+    rows = {t: _base_row(probe, "alpaca_quote", t) for t in tickers}
+    if not key_id or not secret_key:
+        return _alpaca_missing_key_rows(probe, "alpaca_quote", tickers)
+
+    try:
+        resp = requests.get(
+            f"{ALPACA_DATA_BASE}/quotes/latest",
+            params={"symbols": ",".join(tickers), "feed": "iex"},
+            headers=_alpaca_headers(key_id, secret_key),
+            timeout=HTTP_TIMEOUT_SECS,
+        )
+    except requests.RequestException as e:
+        for row in rows.values():
+            row["error"] = f"{type(e).__name__}: {e}"
+        return rows
+
+    for row in rows.values():
+        row["http_status"] = resp.status_code
+
+    if resp.status_code != 200:
+        for row in rows.values():
+            row["error"] = f"HTTP {resp.status_code}"
+            row["raw_payload"] = _safe_json({"text": resp.text[:1000]})
+        return rows
+
+    try:
+        data = resp.json()
+    except ValueError as e:
+        for row in rows.values():
+            row["error"] = f"invalid JSON: {e}"
+        return rows
+
+    quotes = data.get("quotes") or {}
+    for t in tickers:
+        row = rows[t]
+        q = quotes.get(t)
+        if not q:
+            row["status"] = "no_data"
+            continue
+        row["raw_payload"] = _safe_json(q)
+        row["bid"] = q.get("bp")
+        row["ask"] = q.get("ap")
+        row["bid_size"] = q.get("bs")
+        row["ask_size"] = q.get("as")
+        row["source_ts_raw"] = q.get("t")
+        row["source_ts"] = _iso_z_to_iso(q.get("t"))
+        row["status"] = "ok" if (row["bid"] is not None or row["ask"] is not None) else "no_data"
+    return rows
+
+
+def fetch_alpaca_bars_1m_batch(probe: str, tickers: list[str], key_id: str | None,
+                                secret_key: str | None) -> dict[str, dict]:
+    """Historical 1-minute bars since today's 04:00 ET session start, one
+    batched call (paginated via next_page_token — at ~90 tickers over a
+    multi-hour window this regularly exceeds a single page). Same
+    forming-bar-safe shape as fetch_yfinance_bars_1m: the still-accumulating
+    current-minute bar's volume is kept separate from the cumulative sum,
+    which only ever sums CLOSED bars. Additionally sums Alpaca's own per-bar
+    trade count (`n`) into cumulative_trade_count — unlike yfinance's chart
+    API, which structurally reports zero volume for every extended-hours
+    bar, this is real IEX print activity."""
+    rows = {t: _base_row(probe, "alpaca_bars_1m", t) for t in tickers}
+    if not key_id or not secret_key:
+        return _alpaca_missing_key_rows(probe, "alpaca_bars_1m", tickers)
+
+    start = _et_session_start_utc_iso()
+    end = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    bars_by_ticker: dict[str, list[dict]] = {t: [] for t in tickers}
+    page_token = None
+    pages = 0
+
+    try:
+        while True:
+            params = {
+                "symbols": ",".join(tickers), "timeframe": "1Min",
+                "start": start, "end": end, "feed": "iex", "limit": 10000,
+            }
+            if page_token:
+                params["page_token"] = page_token
+            resp = requests.get(
+                f"{ALPACA_DATA_BASE}/bars", params=params,
+                headers=_alpaca_headers(key_id, secret_key), timeout=HTTP_TIMEOUT_SECS,
+            )
+            if resp.status_code != 200:
+                for row in rows.values():
+                    row["error"] = f"HTTP {resp.status_code}"
+                    row["http_status"] = resp.status_code
+                return rows
+            data = resp.json()
+            for t, bars in (data.get("bars") or {}).items():
+                bars_by_ticker.setdefault(t, []).extend(bars)
+            pages += 1
+            page_token = data.get("next_page_token")
+            if not page_token or pages >= ALPACA_MAX_BAR_PAGES:
+                break
+    except requests.RequestException as e:
+        for row in rows.values():
+            row["error"] = f"{type(e).__name__}: {e}"
+        return rows
+
+    now_utc = datetime.now(timezone.utc)
+    for t in tickers:
+        row = rows[t]
+        bars = bars_by_ticker.get(t) or []
+        if not bars:
+            row["status"] = "no_data"
+            continue
+
+        # Alpaca returns bars in chronological order. A bar has closed once
+        # its bucket end (start + 1m) is at or before now — same rule as
+        # fetch_yfinance_bars_1m.
+        last_bar = bars[-1]
+        last_bar_start = datetime.fromisoformat(last_bar["t"].replace("Z", "+00:00"))
+        is_forming = (last_bar_start + timedelta(minutes=1)) > now_utc
+        forming = last_bar if is_forming else None
+        completed = bars[:-1] if is_forming else bars
+
+        payload = {
+            "bar_count": len(bars),
+            "forming_bar_excluded": is_forming,
+            "window_start": bars[0]["t"],
+            "window_end": last_bar["t"],
+        }
+        if forming is not None:
+            row["forming_bar_ts"] = forming["t"]
+            row["forming_bar_volume"] = forming.get("v")
+            payload["forming_bar"] = {"timestamp": forming["t"], "close": forming.get("c"), "volume": forming.get("v")}
+
+        if not completed:
+            row["raw_payload"] = _safe_json(payload)
+            row["price"] = forming.get("c") if forming else None
+            row["status"] = "ok" if row["price"] is not None else "no_data"
+            continue
+
+        last_completed = completed[-1]
+        cumulative_volume = sum(b.get("v", 0) or 0 for b in completed)
+        cumulative_trade_count = sum(b.get("n", 0) or 0 for b in completed)
+        session_high = max((b["h"] for b in completed if b.get("h") is not None), default=None)
+        session_low = min((b["l"] for b in completed if b.get("l") is not None), default=None)
+
+        payload["last_completed_bar"] = {
+            "timestamp": last_completed["t"], "close": last_completed.get("c"), "volume": last_completed.get("v"),
+        }
+        payload["cumulative_volume_since_open"] = cumulative_volume
+        payload["cumulative_bar_count"] = len(completed)
+        payload["cumulative_trade_count"] = cumulative_trade_count
+        payload["session_high"] = session_high
+        payload["session_low"] = session_low
+        row["raw_payload"] = _safe_json(payload)
+
+        row["source_ts_raw"] = last_completed["t"]
+        row["source_ts"] = _iso_z_to_iso(last_completed["t"])
+        row["price"] = forming.get("c") if forming is not None else last_completed.get("c")
+        row["last_completed_bar_volume"] = last_completed.get("v")
+        row["last_completed_bar_ts"] = last_completed["t"]
+        row["cumulative_volume_since_open"] = cumulative_volume
+        row["cumulative_bar_count"] = len(completed)
+        row["cumulative_trade_count"] = cumulative_trade_count
+        # Not part of probes/db.py's OBSERVATION_COLUMNS (session high/low
+        # isn't a probe-schema field) — these two are read directly by
+        # seismo/collect_quotes.py, which uses the dict, not the DB row.
+        row["session_high"] = session_high
+        row["session_low"] = session_low
+
+        if row["last_completed_bar_volume"] is not None:
+            row["volume"] = row["last_completed_bar_volume"]
+            row["volume_field"] = "last_completed_bar_volume_1m"
+
+        row["status"] = "ok" if row["price"] is not None else "no_data"
+
+    return rows

@@ -1,0 +1,74 @@
+---
+interface Headline {
+  headline: string;
+  source: string;
+  source_url: string | null;
+  published_at: string | null;
+  category: string;
+}
+
+interface Props {
+  headlines: Headline[] | null;
+}
+
+const { headlines } = Astro.props;
+
+const CATEGORY_LABEL: Record<string, string> = {
+  fed_rates: 'Fed / rates',
+  oil_energy: 'Oil / energy',
+  semis_export_controls: 'Semis / export controls',
+  crypto: 'Crypto',
+  geopolitical: 'Geopolitical',
+};
+
+function fmtTime(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+  } catch {
+    return iso;
+  }
+}
+---
+
+<div class="macro-news">
+  <h2 style="margin-bottom:6px;">What's moving the macro picture</h2>
+  <p class="lede" style="margin-bottom:16px;">
+    The ten freshest headlines specifically tied to this watchlist's clusters — Fed/rates,
+    oil/energy, semiconductors/export controls, crypto, and major geopolitical events. Not
+    generic market news; filtered toward what actually moves these names.
+  </p>
+  {!headlines && <div class="market-tile-unavailable">Data unavailable</div>}
+  {headlines && headlines.length === 0 && (
+    <div class="market-tile-unavailable">Nothing matched the filter this morning.</div>
+  )}
+  {headlines && headlines.length > 0 && (
+    <ul class="macro-news-list">
+      {headlines.map((h) => (
+        <li>
+          <span class="macro-news-category">{CATEGORY_LABEL[h.category] ?? h.category}</span>
+          <a href={h.source_url ?? undefined} target="_blank" rel="noopener" class="macro-news-headline">
+            {h.headline}
+          </a>
+          <span class="macro-news-meta">{h.source} — {fmtTime(h.published_at)}</span>
+        </li>
+      ))}
+    </ul>
+  )}
+</div>
+
+<style>
+  .macro-news-list { list-style: none; margin: 0 0 32px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .macro-news-list li {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    padding: 10px 0; border-bottom: 1px solid var(--gridline);
+  }
+  .macro-news-category {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em;
+    color: var(--muted); background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 999px; padding: 2px 8px; flex-shrink: 0;
+  }
+  .macro-news-headline { color: var(--text-primary); font-weight: 600; font-size: 0.94rem; }
+  .macro-news-meta { color: var(--muted); font-size: 0.78rem; margin-left: auto; white-space: nowrap; }
+  .market-tile-unavailable { color: var(--muted); font-style: italic; padding: 10px 0 24px; }
+</style>

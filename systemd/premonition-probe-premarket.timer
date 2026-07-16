@@ -1,8 +1,8 @@
 [Unit]
-Description=Fire the premonition pre-market latency probe Mon-Fri at 08:00 ET
+Description=Fire the premonition pre-market latency probe Mon-Fri at 07:55 ET
 
 [Timer]
-OnCalendar=Mon-Fri 08:00 America/New_York
+OnCalendar=Mon-Fri 07:55 America/New_York
 Persistent=true
 AccuracySec=30s
 

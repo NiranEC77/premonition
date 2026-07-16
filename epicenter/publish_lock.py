@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -38,6 +38,94 @@ def _halt_prone_set() -> set[str]:
     Labeled as such wherever it's shown."""
     universe = yaml.safe_load(UNIVERSE_PATH.read_text())
     return set(universe.get("watch_for_illiquidity", []))
+
+
+def _market_context(conn) -> dict:
+    """NQ/CL futures level plus HER OWN trading-rule flags — displayed back
+    to her as her discipline, never framed as premonition's recommendation
+    (see how-this-works.astro / the dashboard copy for that framing). The
+    flag logic below is specified exactly as she gave it, verbatim — not
+    derived, not tuned, not "improved."
+
+      CL (oil): up >=5% -> red "strongly consider no trading"
+                up >=3% -> yellow "caution — consider reducing position to half size"
+                otherwise -> green "normal trading day"
+      NQ (Nasdaq): up >=0.5% -> green "normal trading day, bias long"
+                   down >=1% -> red "high alert — consider sitting out"
+                   otherwise -> yellow "caution — consider reducing position to half size"
+
+    FLAGGED, NOT CHANGED: NQ's "otherwise" band covers everything from -1%
+    (exclusive) up to +0.5% (exclusive) — a dead-flat 0.0% morning and a
+    -0.8% morning both show yellow. That may be exactly intended (yellow as
+    "no strong signal either way"), but it's worth confirming with her
+    before treating this as final. Built exactly as specified either way."""
+    def _quote(symbol: str) -> dict | None:
+        row = conn.execute(
+            "SELECT price, prev_close, change_pct FROM macro_quotes WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        if not row or row[0] is None:
+            return None
+        price, prev_close, change_pct = row
+        return {
+            "level": price,
+            "change_abs": (price - prev_close) if prev_close is not None else None,
+            "change_pct": change_pct,
+        }
+
+    cl = _quote("CL=F")
+    if cl is not None:
+        pct = cl["change_pct"] or 0
+        if pct >= 5:
+            cl.update(flag_color="red", flag_emoji="\U0001F534", flag_message="strongly consider no trading")
+        elif pct >= 3:
+            cl.update(flag_color="yellow", flag_emoji="\U0001F7E1",
+                      flag_message="caution — consider reducing position to half size")
+        else:
+            cl.update(flag_color="green", flag_emoji="\U0001F7E2", flag_message="normal trading day")
+
+    nq = _quote("NQ=F")
+    if nq is not None:
+        pct = nq["change_pct"] or 0
+        if pct >= 0.5:
+            nq.update(flag_color="green", flag_emoji="\U0001F7E2", flag_message="normal trading day, bias long")
+        elif pct <= -1:
+            nq.update(flag_color="red", flag_emoji="\U0001F534", flag_message="high alert — consider sitting out")
+        else:
+            nq.update(flag_color="yellow", flag_emoji="\U0001F7E1",
+                      flag_message="caution — consider reducing position to half size")
+
+    return {"nq": nq, "cl": cl}
+
+
+def _macro_headlines(conn) -> list[dict]:
+    rows = conn.execute(
+        "SELECT headline, source, source_url, published_at, category FROM macro_headlines "
+        "ORDER BY published_at DESC"
+    ).fetchall()
+    return [
+        {"headline": r[0], "source": r[1], "source_url": r[2], "published_at": r[3], "category": r[4]}
+        for r in rows
+    ]
+
+
+def _recent_catalysts(conn, ticker: str, hours: int = 72, limit: int = 5) -> list[dict]:
+    """The catalyst evidence behind a pick — every headline within the last
+    72h, not just the single freshest one score.py uses for scoring. Capped
+    at 5 so a heavily-covered name doesn't crowd the card; 72h and 5 are
+    display choices, not scoring inputs — score.py's catalyst_freshness
+    feature is untouched by this."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    rows = conn.execute(
+        "SELECT headline, source, source_url, published_at, fetched_at FROM catalysts "
+        "WHERE ticker = ? AND COALESCE(published_at, fetched_at) >= ? "
+        "ORDER BY COALESCE(published_at, fetched_at) DESC LIMIT ?",
+        (ticker, cutoff, limit),
+    ).fetchall()
+    return [
+        {"text": r[0], "source": r[1], "source_url": r[2], "source_ts": r[3] or r[4]}
+        for r in rows
+    ]
 
 
 def _cluster_story(conn) -> str | None:
@@ -85,10 +173,13 @@ def build_brief_and_picks(conn, halt_prone_set: set[str]) -> tuple[dict, list[di
         "data_age_secs": _data_age_secs(conn),
         "verify_rejects": 0,  # no verifier this round — see task history, not silently claimed run
         "shadow_mode": True,
+        "market_context": _market_context(conn),
+        "macro_headlines": _macro_headlines(conn),
     }
 
     pick_rows = []
     for rank, c in enumerate(picks, 1):
+        catalyst_reasons = _recent_catalysts(conn, c.ticker)
         pick_rows.append({
             "ticker": c.ticker,
             "company_name": c.company_name,
@@ -104,7 +195,7 @@ def build_brief_and_picks(conn, halt_prone_set: set[str]) -> tuple[dict, list[di
             "halt_prone": c.ticker in halt_prone_set,
             "recent_ipo": c.recent_ipo,
             "levels": c.levels,
-            "reasons": [_build_reason(c)],
+            "reasons": catalyst_reasons if catalyst_reasons else [_build_reason(c)],
             "demoted_note": None,
         })
 

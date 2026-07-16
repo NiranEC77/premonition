@@ -10,7 +10,7 @@
 # themselves should move only when the scoreboard says so, same rule as
 # scorer weights.
 
-min_premarket_dollar_volume: 500000    # $500k pre-market dollar volume
+min_premarket_dollar_volume: 10000     # PROVISIONAL — see note below. Was $500k.
 max_spread_pct: 1.5                    # spread as % of price; proxy when real spread unavailable
 min_price: 2.00                        # sub-$2 names carry structurally wide spreads
 min_float_shares: 5000000              # 5M share float floor
@@ -19,3 +19,24 @@ min_float_shares: 5000000              # 5M share float floor
 # module docstring on the extended-hours volume gap) cannot be evaluated
 # against min_premarket_dollar_volume and are gated out as INSUFFICIENT_DATA,
 # not silently passed through on a missing-means-zero assumption.
+
+# --- 2026-07-16: min_premarket_dollar_volume is a rough, provisional guess, ---
+# --- not a calibrated number. Do not treat it as tuned. ---
+#
+# The original $500k floor was a placeholder sized with no real data source in
+# mind. As of today, premarket_volume comes from Alpaca's IEX feed (see
+# seismo/collect_quotes.py), and IEX is only ~2% of the consolidated tape —
+# so a real, liquid name's IEX-only dollar volume will structurally read
+# roughly 20-50x smaller than its true full-market pre-market dollar volume.
+# Applying the old $500k floor to an IEX-only number would gate out genuinely
+# tradable names as a false negative, not a real absence of liquidity.
+#
+# 10000 is that same $500k floor scaled down by ~2% (IEX's rough share of
+# consolidated volume) — a stopgap to give real names a chance to clear the
+# gate, not a calibrated threshold. seismo/collect_quotes.py logs the top 10
+# tickers by premarket dollar volume on every run (see
+# /srv/premonition/logs/premarket-dollar-volume-*.log) specifically so this
+# number can be set from measured IEX data instead of a guess. Replace this
+# comment and the number together once that calibration happens — a
+# provisional number with no note explaining it is indistinguishable from a
+# tuned one to whoever reads this file next.

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # bin/premonition-lock — 09:15 ET run. THE LOCK. Refreshes the live quote
-# snapshot (freshest possible pre-market gap + volume) and publishes.
+# snapshot (freshest possible pre-market gap + volume), the NQ/CL market
+# context, and macro headlines, then publishes. Draft (08:30) already ran
+# all of this once, but by 09:15 that's 45 minutes stale — the market
+# context tiles are shown as "live" and must actually be fresh at publish
+# time, same freshness rule as everything else here.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
@@ -8,5 +12,7 @@ set -a; source /etc/premonition/env; set +a
 
 echo "=== $(date) lock run starting ==="
 python3 -m seismo.collect_quotes
+python3 -m seismo.collect_macro
+python3 -m seismo.collect_macro_news
 python3 -m epicenter.publish_lock
 echo "=== $(date) lock run complete ==="

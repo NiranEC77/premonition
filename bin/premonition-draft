@@ -13,4 +13,5 @@ python3 -m seismo.collect_fundamentals
 python3 -m seismo.collect_earnings
 python3 -m seismo.collect_catalysts
 python3 -m seismo.collect_macro
+python3 -m seismo.collect_macro_news
 echo "=== $(date) draft run complete ==="

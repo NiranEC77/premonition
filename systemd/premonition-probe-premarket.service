@@ -1,9 +1,9 @@
 [Unit]
-Description=premonition Probe A (freshness) — the original pre-market run, 08:00-09:30 ET, testing whether preMarketVolume ever populates during a real PRE state.
+Description=premonition Probe A (freshness) — 07:55-09:30 ET, comparing yfinance/Finnhub/Alpaca IEX freshness and volume, including per-ticker Alpaca trade/quote counts for thin names.
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/code/premonition
 EnvironmentFile=-/etc/premonition/env
-ExecStart=%h/code/premonition/.venv/bin/python3 %h/code/premonition/bin/premonition-probe --probe a --start 08:00 --end 09:30
+ExecStart=%h/code/premonition/.venv/bin/python3 %h/code/premonition/bin/premonition-probe --probe a --start 07:55 --end 09:30
 TimeoutStartSec=infinity

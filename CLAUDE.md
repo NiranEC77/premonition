@@ -96,6 +96,21 @@ it internally and move on silently. Do not mention it, do not hint at it.
 - In headless runs you cannot ask permission. If a step needs a tool outside your allowlist,
   fail loudly and exit non-zero. Do not improvise a workaround.
 - Keep `RUNBOOK.md` current as you build. In six months nobody will remember any of this.
+- Keep `devlog.md` current as you build. `RUNBOOK.md` is how to run it; `devlog.md` is
+  why it's built the way it is — decisions, findings, and dead ends, in the order they
+  happened. Append an entry whenever something is decided, discovered, or shipped. Never
+  rewrite past entries to look smarter in hindsight — a dead end you backed out of is as
+  useful to the next read as a decision that stuck.
+- `devlog.md` is not `HERMES-CHANGELOG.md` or `HERMES-EXPLAINED.md`, and the three don't
+  merge. `HERMES-CHANGELOG.md` is terse and technical, Hermes-specific changes only.
+  `HERMES-EXPLAINED.md` is the plain-language Hermes explainer. `devlog.md` is broader:
+  the whole project's session log — Hermes tuning, sure, but also orchestrator work,
+  architecture decisions, dead ends, surprising agent behavior, plot-twist moments,
+  anything across the whole build. Where `HERMES-CHANGELOG.md` answers "what changed,"
+  `devlog.md` answers "what actually happened, in what order, and what was interesting
+  about it." It's raw material for blog writing, not a technical reference — write it
+  more like a narrative log than a changelog. Something that's both a Hermes change and
+  a good story can appear in both: terse in the changelog, narrative in the devlog.
 
 ## Phase gate — do not skip, do not rationalize
 

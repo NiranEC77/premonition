@@ -66,7 +66,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS observations (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     probe                TEXT    NOT NULL,   -- 'freshness' | 'friction'
-    source               TEXT    NOT NULL,   -- 'yfinance_quote' | 'yfinance_bars_1m' | 'yfinance_daily' | 'finnhub_quote'
+    source               TEXT    NOT NULL,   -- 'yfinance_quote' | 'yfinance_bars_1m' | 'yfinance_daily' | 'finnhub_quote' | 'alpaca_quote' | 'alpaca_bars_1m'
     ticker               TEXT    NOT NULL,
     fetched_at           TEXT    NOT NULL,   -- our clock, UTC ISO 8601
     source_ts            TEXT,               -- source's claimed timestamp, converted to UTC ISO 8601
@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS observations (
     postmarket_time          TEXT,
     postmarket_time_raw      TEXT,
 
-    -- yfinance_bars_1m: forming-bar-safe volume fields
+    -- yfinance_bars_1m / alpaca_bars_1m: forming-bar-safe volume fields
     last_completed_bar_volume   REAL,
     last_completed_bar_ts       TEXT,
     forming_bar_volume          REAL,        -- transparency only; never "the" volume
@@ -113,6 +113,18 @@ CREATE TABLE IF NOT EXISTS observations (
     cumulative_volume_since_open REAL,       -- sum over completed bars only
     cumulative_bar_count         INTEGER,
     cumulative_window_start_ts   TEXT,
+    cumulative_trade_count       INTEGER,    -- alpaca_bars_1m only: sum of each bar's own trade count (n).
+                                              -- The direct answer to "how many trades actually arrived"
+                                              -- for a thin pre-market name on IEX's ~2% of the tape.
+
+    -- probes/quote_sanity.py — recorded on any row with a bid/ask, never
+    -- enforced here (the probe only observes; see probes/quote_sanity.py's
+    -- docstring for why gating happens in the caller, not this table).
+    quote_sanity_status   TEXT,              -- 'ok' | 'no_quote' | 'crossed' | 'stale' | 'implausible_spread'
+    quote_sanity_reason   TEXT,
+    quote_age_secs        REAL,              -- fetched_at minus the source's own quote timestamp
+    spread_width          REAL,              -- ask - bid, in price units (distinct from spread_proxy, which is a formula-derived estimate)
+    quote_sanity_formula  TEXT,              -- versioned, e.g. 'freshness_and_spread_v1'
 
     raw_payload          TEXT    NOT NULL,   -- full raw response, JSON-encoded
     created_at           TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -160,6 +172,12 @@ _COLUMN_MIGRATIONS = [
     ("cumulative_volume_since_open", "REAL"),
     ("cumulative_bar_count", "INTEGER"),
     ("cumulative_window_start_ts", "TEXT"),
+    ("cumulative_trade_count", "INTEGER"),
+    ("quote_sanity_status", "TEXT"),
+    ("quote_sanity_reason", "TEXT"),
+    ("quote_age_secs", "REAL"),
+    ("spread_width", "REAL"),
+    ("quote_sanity_formula", "TEXT"),
 ]
 
 
@@ -193,6 +211,8 @@ OBSERVATION_COLUMNS = [
     "last_completed_bar_volume", "last_completed_bar_ts",
     "forming_bar_volume", "forming_bar_ts",
     "cumulative_volume_since_open", "cumulative_bar_count", "cumulative_window_start_ts",
+    "cumulative_trade_count",
+    "quote_sanity_status", "quote_sanity_reason", "quote_age_secs", "spread_width", "quote_sanity_formula",
     "raw_payload",
 ]
 
