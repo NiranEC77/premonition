@@ -373,3 +373,27 @@ render: picks now sit directly under the market-context tiles, macro news moved 
 bottom of the page. The picks are the actual product; the macro/geopolitical context is
 supporting material, and the layout hadn't reflected that until someone actually looked at
 the live page and said so.
+
+## 2026-07-17 (afternoon) — The same bug bit again, at 16:15, because the morning's fix wasn't thorough
+
+`bin/premonition-grade` has the identical `set -e` + blind-`source /etc/premonition/env`
+shape as `bin/premonition-draft` and `bin/premonition-lock` — fixed on both of those a few
+hours earlier the same morning. Missed this one under the 08:47 time pressure, reasoning
+from memory about which scripts mattered instead of actually checking. It crashed at
+16:15, silently, identically — no grade published, today's actual RGTI outcome briefly at
+risk of being lost. Caught by "how did we do" a few minutes later, not by anything
+watching for it. Fixed properly this time: `grep -rn "source /etc/premonition/env"` across
+the whole repo rather than trusting memory, which turned up one more instance in the
+parked `ibkr/start_gateway.sh` too. Manually ran today's grade to recover the data point.
+
+The actual grade, once it could run: RGTI's opening range was 3.15%, beating both the
+naive baseline (2.58%, itself built from only 4 real candidates — MARA/QUBT/RGTI/GOOG,
+confirming the same starvation problem hits the comparison baseline, not just our own
+picks) and the 87-ticker universe average (2.42%). Continuation call was right (predicted
+~52%, it continued; Brier 0.235). One data point, explicitly not a verdict — the scoreboard
+needs 20 graded sessions before it says anything, and today's own baseline could only name
+4 candidates instead of 6, which is itself the more important finding than the win.
+
+Lesson worth keeping: a fix made under time pressure, scoped to "the thing that's actually
+on fire right now," is not the same as a fix scoped to "everywhere this bug pattern
+exists." Should have grepped the whole repo the first time.
