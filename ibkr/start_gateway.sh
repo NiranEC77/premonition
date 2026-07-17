@@ -32,7 +32,7 @@ LOG_FILE="${LOG_DIR}/ibgateway-$(date +%Y-%m-%d).log"
 XVFB_DISPLAY=":50"
 
 set -a
-source /etc/premonition/env
+source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' /etc/premonition/env)
 set +a
 
 if [[ -z "${IBKR_LOGIN_ID:-}" || -z "${IBKR_PASSWORD:-}" ]]; then

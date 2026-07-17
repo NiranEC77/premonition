@@ -4,7 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
-set -a; source /etc/premonition/env; set +a
+# Filter to well-formed KEY=VALUE lines before sourcing — same fix as
+# bin/premonition-draft and bin/premonition-lock (2026-07-17); this script
+# was missed in that same-morning fix and paid for it at 16:15.
+set -a; source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' /etc/premonition/env); set +a
 
 echo "=== $(date) grade run starting ==="
 python3 -m epicenter.grade
