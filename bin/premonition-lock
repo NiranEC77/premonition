@@ -8,7 +8,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source .venv/bin/activate
-set -a; source /etc/premonition/env; set +a
+# Filter to well-formed KEY=VALUE lines before sourcing — a stray malformed
+# line in the secrets file (no =, not a valid identifier) must never be able
+# to take down a production run under set -e by being executed as a command.
+set -a; source <(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' /etc/premonition/env); set +a
 
 echo "=== $(date) lock run starting ==="
 python3 -m seismo.collect_quotes

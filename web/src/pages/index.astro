@@ -143,10 +143,7 @@ for (const b of gradedSessions) {
   )}
 
   {latestBrief && (
-    <>
-      <MarketContext nq={latestBrief.market_context?.nq ?? null} cl={latestBrief.market_context?.cl ?? null} />
-      <MacroNews headlines={latestBrief.macro_headlines ?? null} />
-    </>
+    <MarketContext nq={latestBrief.market_context?.nq ?? null} cl={latestBrief.market_context?.cl ?? null} />
   )}
 
   {supabaseConfigured && !queryError && !latestBrief && (
@@ -169,6 +166,10 @@ for (const b of gradedSessions) {
     <div class="pick-grid">
       {picks.map((p) => <PickCard pick={p} />)}
     </div>
+  )}
+
+  {latestBrief && (
+    <MacroNews headlines={latestBrief.macro_headlines ?? null} />
   )}
 </Base>
 
